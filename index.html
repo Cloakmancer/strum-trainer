@@ -27,8 +27,31 @@ button:focus-visible,input:focus-visible{outline:2px solid var(--up);outline-off
 .pad.u{background:var(--up);color:#06131f}
 .pad.c{background:var(--chuck);color:#1c0a22}
 .cell.c .g{color:var(--chuck)}
-#cstrip .cwrap{flex:0 0 auto}
-#cstrip .cwrap svg{width:64px}
+#cstrip .cwrap,#songchords .cwrap{flex:0 0 auto}
+#cstrip .cwrap svg,#songchords .cwrap svg{width:64px}
+textarea{width:100%;background:var(--bg);border:1px solid var(--line);color:var(--text);border-radius:10px;padding:12px 14px;font:15px/1.3 ui-monospace,Consolas,"Courier New",monospace;resize:vertical}
+textarea:focus-visible{outline:2px solid var(--up)}
+/* lyrics with chords above the words */
+.song{position:relative;text-align:left;line-height:1.25}
+#lyrprev{margin-top:12px;max-height:340px;overflow:auto;background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:10px 14px;font-size:17px}
+#lyrprev:empty{display:none}
+.song .sec{color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.08em;font-size:.72em;margin:.7em 0 .2em}
+.song .gap{height:.5em}
+.song .ln{display:flex;flex-wrap:wrap;align-items:flex-end;margin:.15em 0}
+.song .sg{display:inline-flex;flex-direction:column}
+.song .ch{align-self:flex-start;color:var(--down);font-weight:800;font-size:.85em;padding:0 .3em 0 0;border-radius:6px;min-height:1.25em}
+.song .tx{white-space:pre;padding-right:.05em}
+.song .sg:has(.tx:only-child) {}
+#lyr{flex:0 0 auto;overflow:auto;height:min(30vh,240px);width:min(960px,100%);margin:6px auto 4px;font-size:clamp(17px,2.7vw,30px);padding:4px 10px;scroll-behavior:smooth}
+#lyr .ln{opacity:.4}
+#lyr .ln.now{opacity:1}
+#lyr .ch.cur{background:var(--down);color:#1b1206;padding:0 .3em;margin-right:.05em}
+#stage.withlyrics #big{height:min(28vh,38vw);width:min(28vh,38vw)}
+#stage.withlyrics .cwrap svg{width:min(17vh,22vw)}
+#stage.withlyrics #nextchord svg{width:min(11vh,14vw)}
+#stage.withlyrics #beat{font-size:clamp(28px,5vw,64px)}
+#stage.withlyrics #word{font-size:clamp(20px,3.6vw,40px)}
+#stage.withlyrics .cname{font-size:clamp(24px,4.5vw,52px)}
 .seg.on{background:var(--up);color:#06131f;font-weight:700}
 .hint{color:var(--muted);font-size:13px;margin:10px 0 0}
 .strip{display:flex;flex-wrap:wrap;gap:8px}
@@ -121,14 +144,27 @@ input[type=range]{width:100%;accent-color:var(--up)}
   </section>
 
   <section>
-    <h2>3 · Speed</h2>
+    <h2>3 · Song lyrics (optional)</h2>
+    <textarea id="lyrtxt" rows="9" spellcheck="false" aria-label="Song with chords above lyrics" placeholder="Paste a song with the chords on the line above the words:&#10;&#10;[Chorus]&#10;C            G&#10;Play it slow, play it slow,&#10;Am           F&#10;Let the chords go where they go"></textarea>
+    <div class="row">
+      <button id="lyrex">Load example</button><button id="lyrclear">Clear</button>
+      <span class="tag" id="songinfo"></span>
+    </div>
+    <label class="opt"><input type="checkbox" id="songon"> Follow this song in full screen (chords come from the song, one per change)</label>
+    <div class="row" id="songchords"></div>
+    <div class="song" id="lyrprev"></div>
+    <p class="hint">Put chords on their own line directly above the lyric line, lined up with the word where you change. <b>[Verse]</b> / <b>[Chorus]</b> lines become headings. Each chord in the song is one change, and the "Change chord every N loops" setting above sets how long each lasts.</p>
+  </section>
+
+  <section>
+    <h2>4 · Speed</h2>
     <div class="bpmline"><span><span class="bpmnum" id="bpmnum">60</span> <span class="tag">BPM</span></span><span class="tag" id="bpmname">Easy</span></div>
     <input type="range" id="bpm" min="30" max="200" value="60" aria-label="Tempo in BPM">
     <div class="row"><button data-bpm="-5">−5</button><button data-bpm="5">+5</button><span class="tag">Start slow. If you can do 4 clean loops, go up 5.</span></div>
   </section>
 
   <section>
-    <h2>4 · Options</h2>
+    <h2>5 · Options</h2>
     <label class="opt"><input type="checkbox" id="click" checked> Metronome click</label>
     <label class="opt"><input type="checkbox" id="strum" checked> Strum sound</label>
     <div class="row" role="group" aria-label="Strum sound style" style="margin:0 0 8px 26px">
@@ -162,6 +198,7 @@ input[type=range]{width:100%;accent-color:var(--up)}
     </div>
     <div id="countin"></div>
   </div>
+  <div class="song" id="lyr" style="display:none"></div>
   <div class="strip" id="sstrip"></div>
   <div id="bar">
     <button id="sminus">−5</button>
@@ -189,7 +226,7 @@ const PRESETS = [
 ];
 const save = JSON.parse(localStorage.getItem("strum-v1") || "{}");
 const S = Object.assign({pattern:["d","-","d","u","-","u","d","u"], bpm:60, click:true, strum:true, countin:true, ghost:true,
-  instrument:"uke", sound:"real", chords:["C","Am","F","G"], cbars:1, trainer:false, tstep:5, tevery:4, tmax:100}, save);
+  instrument:"uke", sound:"real", song:"", songOn:false, chords:["C","Am","F","G"], cbars:1, trainer:false, tstep:5, tevery:4, tmax:100}, save);
 const persist = () => { try{ localStorage.setItem("strum-v1", JSON.stringify(S)); }catch(e){} };
 
 /* ---------- pattern parsing / rendering ---------- */
@@ -337,7 +374,7 @@ function getBus(){
   return bus.in;
 }
 function warmUp(){
-  const names = S.chords.length ? S.chords : [null];
+  const names = seq().length ? [...new Set(seq())] : [null];
   names.forEach(n => chordFreqs(n).forEach(f => pluckBuffer(f, S.instrument)));
 }
 function playReal(dir, t, chord, mute){
@@ -403,6 +440,7 @@ function renderChordSetup(){
   $("tuning").textContent = S.instrument==="gtr" ? "Diagrams are for standard guitar tuning (E A D G B e); × = muted string." : "Diagrams are for standard GCEA ukulele tuning.";
   $("iuke").classList.toggle("on", S.instrument!=="gtr"); $("igtr").classList.toggle("on", S.instrument==="gtr");
   $("iuke").setAttribute("aria-pressed", S.instrument!=="gtr"); $("igtr").setAttribute("aria-pressed", S.instrument==="gtr");
+  if (typeof refreshSong === "function" && $("songchords")) refreshSong();
   persist();
 }
 for (const [id,v] of [["iuke","uke"],["igtr","gtr"]]) $(id).onclick = () => { S.instrument = v; renderChordSetup(); };
@@ -410,12 +448,95 @@ $("ctxt").addEventListener("input", e => { S.chords = parseChords(e.target.value
 $("ctxt").addEventListener("blur", () => { $("ctxt").value = S.chords.join(" "); });
 $("cbars").value = S.cbars; $("cbars").onchange = e => { S.cbars = Math.max(1, Math.min(8, +e.target.value||1)); persist(); };
 CPRESETS.forEach(([label,p]) => { const b=document.createElement("button"); b.textContent=label; b.onclick=()=>{S.chords=parseChords(p);renderChordSetup();}; $("cpresets").appendChild(b); });
+/* ---------- song / lyrics mode ---------- */
+const CHORD_RE = /^[A-G](#|b)?(m|min|maj|dim|aug|sus[24]?|add\d+)?\d*(\/[A-G](#|b)?)?$/;
+const SECTION_RE = /^\[.*\]$/;
+const EXAMPLE_SONG = `[Verse]
+C               Am
+Morning light on the kitchen floor,
+F               G
+Kettle sings and I want some more
+C            Am
+Nothing planned and nowhere to be,
+F            G
+Just a little song for me
+
+[Chorus]
+C       G
+Play it slow, play it slow,
+Am      F
+Let the chords go where they go`;
+let SONG = {items:[], seq:[]}, lastOcc = -1;
+const songActive = () => S.songOn && SONG.seq.length > 0;
+const seq = () => songActive() ? SONG.seq : S.chords;
+const esc = s => s.replace(/[&<>]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));
+function parseSong(txt){
+  const items = [], seq = [];
+  const lines = txt.replace(/\t/g,"    ").split(/\r?\n/).map(l => l.replace(/\s+$/,""));
+  const isChordLine = l => { const t = l.trim(); return t !== "" && t.split(/\s+/).every(x => CHORD_RE.test(x)); };
+  const plain = l => l !== undefined && l.trim() && !SECTION_RE.test(l.trim()) && !isChordLine(l) && !/^source:/i.test(l.trim());
+  for (let i=0;i<lines.length;i++){
+    const l = lines[i], t = l.trim();
+    if (!t){ if (items.length && items[items.length-1].type !== "gap") items.push({type:"gap"}); continue; }
+    if (/^source:/i.test(t)) continue;
+    if (SECTION_RE.test(t)){ items.push({type:"sec", text:t}); continue; }
+    if (isChordLine(l)){
+      const chords = [], re = /\S+/g; let m;
+      while ((m = re.exec(l))) { chords.push({name:m[0], pos:m.index, occ:seq.length}); seq.push(m[0]); }
+      let text = "";
+      if (plain(lines[i+1])) { text = lines[i+1]; i++; }
+      items.push({type:"line", text, chords});
+    } else items.push({type:"line", text:t, chords:[]});
+  }
+  return {items, seq};
+}
+function songHTML(song){
+  const seg = (ch, text) => `<span class="sg">${ch}<span class="tx">${text === "" ? "&nbsp;" : esc(text)}</span></span>`;
+  return song.items.map((it, li) => {
+    if (it.type === "gap") return '<div class="gap"></div>';
+    if (it.type === "sec") return `<div class="sec">${esc(it.text)}</div>`;
+    const cs = it.chords, t = it.text;
+    if (!cs.length) return `<div class="ln" data-li="${li}">${seg('<span class="ch">&nbsp;</span>', t)}</div>`;
+    const cuts = cs.map(c => Math.min(c.pos, t.length));
+    let segs = cuts[0] > 0 ? seg('<span class="ch">&nbsp;</span>', t.slice(0, cuts[0])) : "";
+    cs.forEach((c, k) => {
+      const piece = t.slice(cuts[k], k+1 < cs.length ? cuts[k+1] : t.length);
+      segs += seg(`<span class="ch" data-occ="${c.occ}">${esc(c.name)}</span>`, t ? piece : "  ");
+    });
+    return `<div class="ln" data-li="${li}">${segs}</div>`;
+  }).join("");
+}
+function markSong(root, occ){
+  root.querySelectorAll(".ch.cur").forEach(e => e.classList.remove("cur"));
+  root.querySelectorAll(".ln.now").forEach(e => e.classList.remove("now"));
+  const el = root.querySelector(`.ch[data-occ="${occ}"]`);
+  if (!el) return;
+  el.classList.add("cur");
+  const ln = el.closest(".ln"); ln.classList.add("now");
+  root.scrollTo({top: Math.max(0, ln.offsetTop - root.clientHeight/2 + ln.offsetHeight/2)});
+}
+function refreshSong(){
+  SONG = parseSong(S.song || "");
+  $("lyrprev").innerHTML = SONG.items.length ? songHTML(SONG) : "";
+  const uniq = [...new Set(SONG.seq)];
+  $("songchords").innerHTML = uniq.map(c => `<div class="cwrap" style="background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:6px 10px"><b>${esc(c)}</b><div style="width:52px">${chordSVG(c)}</div></div>`).join("");
+  $("songinfo").textContent = SONG.seq.length ? `${SONG.seq.length} chord changes · ${uniq.length} different chords` : "";
+  persist();
+}
+$("lyrtxt").value = S.song || "";
+$("songon").checked = S.songOn;
+$("lyrtxt").addEventListener("input", e => { S.song = e.target.value; refreshSong(); });
+$("songon").onchange = e => { S.songOn = e.target.checked; persist(); };
+$("lyrex").onclick = () => { S.song = EXAMPLE_SONG; $("lyrtxt").value = EXAMPLE_SONG; S.songOn = true; $("songon").checked = true; refreshSong(); };
+$("lyrclear").onclick = () => { S.song = ""; $("lyrtxt").value = ""; refreshSong(); };
+
 function showChords(loops, i, counting){
-  const n = S.chords.length;
+  const n = seq().length;
   $("chordbox").classList.toggle("on", n>0); $("nextchord").classList.toggle("on", n>1);
   if (!n) return;
   const ci = Math.floor(loops / S.cbars) % n;
-  const cur = S.chords[ci], nxt = S.chords[(ci+1)%n];
+  const cur = seq()[ci], nxt = seq()[(ci+1)%n];
+  if (songActive() && ci !== lastOcc){ lastOcc = ci; markSong($("lyr"), ci); }
   $("cname").textContent = cur; $("cdia").innerHTML = chordSVG(cur);
   $("ncname").textContent = nxt; $("ncdia").innerHTML = chordSVG(nxt);
   const lastLoop = (loops+1) % S.cbars === 0;
@@ -452,7 +573,7 @@ function schedule(){
     const c = S.pattern[idx];
     const isBeat = idx%2===0;
     if (S.click && isBeat) tone(idx%8===0?1500:1000, nextTime, 0.03, "square", 0.06);
-    const cname = S.chords.length ? S.chords[Math.floor(loops / S.cbars) % S.chords.length] : null;
+    const cname = seq().length ? seq()[Math.floor(loops / S.cbars) % seq().length] : null;
     if (S.strum && c==="c") playChuck(nextTime, cname);
     else if (S.strum && c!=="-") playStrum(c, nextTime, cname);
     events.push({t:nextTime, kind:"step", idx, loops});
@@ -513,6 +634,11 @@ async function start(){
   nextTime = ctx.currentTime + 0.1;
   $("sstrip").innerHTML = stripHTML(S.pattern, false);
   $("big").innerHTML = ""; $("word").textContent = ""; $("beat").textContent = ""; $("nextarrow").innerHTML = "";
+  const withSong = songActive();
+  $("stage").classList.toggle("withlyrics", withSong);
+  $("lyr").style.display = withSong ? "block" : "none";
+  lastOcc = -1;
+  if (withSong) { $("lyr").innerHTML = songHTML(SONG); $("lyr").scrollTop = 0; }
   $("stage").classList.add("on");
   try{ await $("stage").requestFullscreen(); }catch(e){}
   running = true;
@@ -543,7 +669,7 @@ document.addEventListener("keydown", e => {
   else if (e.key==="Escape") stop();
 });
 
-setBpm(S.bpm); syncSound(); syncTrainer(); renderPattern(); renderChordSetup();
+refreshSong(); setBpm(S.bpm); syncSound(); syncTrainer(); renderPattern(); renderChordSetup();
 })();
 </script>
 </body>
