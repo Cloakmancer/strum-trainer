@@ -131,6 +131,9 @@ input[type=range]{width:100%;accent-color:var(--up)}
     <h2>4 · Options</h2>
     <label class="opt"><input type="checkbox" id="click" checked> Metronome click</label>
     <label class="opt"><input type="checkbox" id="strum" checked> Strum sound</label>
+    <div class="row" role="group" aria-label="Strum sound style" style="margin:0 0 8px 26px">
+      <button id="sreal" class="seg" title="Plucked-string model with body resonance">Realistic</button><button id="ssimple" class="seg" title="Plain tones">Simple</button>
+    </div>
     <label class="opt"><input type="checkbox" id="countin" checked> 4-beat count-in</label>
     <label class="opt"><input type="checkbox" id="ghost" checked> Show air-strum arrow on rests</label>
     <label class="opt"><input type="checkbox" id="trainer"> Speed trainer: speed up automatically</label>
@@ -186,7 +189,7 @@ const PRESETS = [
 ];
 const save = JSON.parse(localStorage.getItem("strum-v1") || "{}");
 const S = Object.assign({pattern:["d","-","d","u","-","u","d","u"], bpm:60, click:true, strum:true, countin:true, ghost:true,
-  instrument:"uke", chords:["C","Am","F","G"], cbars:1, trainer:false, tstep:5, tevery:4, tmax:100}, save);
+  instrument:"uke", sound:"real", chords:["C","Am","F","G"], cbars:1, trainer:false, tstep:5, tevery:4, tmax:100}, save);
 const persist = () => { try{ localStorage.setItem("strum-v1", JSON.stringify(S)); }catch(e){} };
 
 /* ---------- pattern parsing / rendering ---------- */
@@ -255,6 +258,12 @@ for (const k of ["click","strum","countin","ghost","trainer"]){
 for (const k of ["tstep","tevery","tmax"]){
   $(k).value = S[k]; $(k).onchange = e => { S[k] = Math.max(1, +e.target.value || 1); persist(); };
 }
+function syncSound(){
+  const real = S.sound !== "simple";
+  $("sreal").classList.toggle("on", real); $("ssimple").classList.toggle("on", !real);
+  $("sreal").setAttribute("aria-pressed", real); $("ssimple").setAttribute("aria-pressed", !real);
+}
+for (const [id,v] of [["sreal","real"],["ssimple","simple"]]) $(id).onclick = () => { S.sound = v; syncSound(); persist(); };
 function syncTrainer(){ $("trainopts").classList.toggle("dim", !S.trainer); }
 
 /* ---------- audio ---------- */
@@ -267,13 +276,92 @@ function tone(freq, t, dur, type, vol){
 }
 // open-string pitches (Hz) in string order: uke G C E A, guitar E A D G B E
 const OPEN = {uke:[392.0, 261.63, 329.63, 440.0], gtr:[82.41, 110.0, 146.83, 196.0, 246.94, 329.63]};
-function playStrum(dir, t, chord){
+function chordFreqs(chord){
   const open = OPEN[S.instrument], frets = (chordLib()[chord] || "0".repeat(open.length));
   const notes = [];
   open.forEach((f,i) => { if (frets[i] !== "x") notes.push(f * Math.pow(2, +frets[i]/12)); });
+  return notes;
+}
+function playStrum(dir, t, chord){
+  if (S.sound === "simple") return playSimple(dir, t, chord);
+  playReal(dir, t, chord, false);
+}
+// simple sound: plain triangle-wave tones
+function playSimple(dir, t, chord){
+  const notes = chordFreqs(chord);
   const order = dir==="d" ? notes : notes.reverse();
   const vol = (dir==="d" ? 0.13 : 0.09) * Math.min(1, 4/Math.max(order.length,1) + 0.25);
   order.forEach((f,i) => tone(f, t+i*(S.instrument==="gtr"?0.009:0.012), 0.4, "triangle", vol));
+}
+
+// realistic sound: Karplus-Strong plucked strings, one cached buffer per pitch
+const KIND = {uke:{dur:1.3, decay:0.9965, smooth:0.5}, gtr:{dur:1.9, decay:0.9987, smooth:0.8}};
+const bufCache = new Map();
+function pluckBuffer(freq, kind){
+  const key = kind + ":" + freq.toFixed(2);
+  let b = bufCache.get(key); if (b) return b;
+  const p = KIND[kind];
+  const N = Math.max(2, Math.round(ctx.sampleRate/freq));
+  const rate = N*freq;                    // buffer rate that makes an N-sample loop exactly this pitch
+  const len = Math.floor(rate*p.dur);
+  const line = new Float32Array(N);
+  let y = 0, mean = 0, peak = 0;
+  for (let i=0;i<N;i++){ y += p.smooth*((Math.random()*2-1) - y); line[i] = y; mean += y; }
+  mean /= N;
+  for (let i=0;i<N;i++){ line[i] -= mean; peak = Math.max(peak, Math.abs(line[i])); }
+  for (let i=0;i<N;i++) line[i] /= peak || 1;
+  b = ctx.createBuffer(1, len, rate);
+  const out = b.getChannelData(0);
+  let idx = 0;
+  for (let i=0;i<len;i++){
+    const nx = idx+1 === N ? 0 : idx+1, v = line[idx];
+    out[i] = v; line[idx] = p.decay * 0.5 * (v + line[nx]); idx = nx;
+  }
+  bufCache.set(key, b);
+  return b;
+}
+let bus = null, lastStrum = null;
+function getBus(){
+  if (!bus){
+    const mk = (type) => { const f = ctx.createBiquadFilter(); f.type = type; return f; };
+    const f1 = mk("peaking"), f2 = mk("peaking"), lp = mk("lowpass"), comp = ctx.createDynamicsCompressor(), out = ctx.createGain();
+    out.gain.value = 0.9;
+    f1.connect(f2); f2.connect(lp); lp.connect(comp); comp.connect(out); out.connect(ctx.destination);
+    bus = {in:f1, f1, f2, lp};
+  }
+  // body resonance and tone per instrument
+  const g = S.instrument === "gtr";
+  bus.f1.frequency.value = g ? 110 : 350;  bus.f1.gain.value = g ? 4 : 3;   bus.f1.Q.value = 1.1;
+  bus.f2.frequency.value = g ? 250 : 900;  bus.f2.gain.value = g ? 2 : 1.5; bus.f2.Q.value = 1;
+  bus.lp.frequency.value = g ? 6500 : 5000;
+  return bus.in;
+}
+function warmUp(){
+  const names = S.chords.length ? S.chords : [null];
+  names.forEach(n => chordFreqs(n).forEach(f => pluckBuffer(f, S.instrument)));
+}
+function playReal(dir, t, chord, mute){
+  const kind = S.instrument;
+  let freqs = chordFreqs(chord);
+  if (dir === "u") freqs = freqs.slice(-Math.min(freqs.length, kind==="gtr" ? 4 : 3)).reverse(); // upstrokes catch the upper strings
+  if (!freqs.length) return;
+  const sg = ctx.createGain();
+  sg.connect(getBus());
+  // the previous strum rings until this one lands, then is damped
+  if (lastStrum){ lastStrum.gain.setTargetAtTime(0, t, mute ? 0.02 : 0.09); }
+  lastStrum = sg;
+  const base = (dir === "d" ? 0.5 : 0.34) * 1.8 / Math.sqrt(freqs.length);
+  const stagger = kind === "gtr" ? 0.011 : 0.014;
+  if (mute){ sg.gain.setValueAtTime(0.7, t); sg.gain.exponentialRampToValueAtTime(0.001, t+0.07); }
+  freqs.forEach((f,i) => {
+    const src = ctx.createBufferSource(), ng = ctx.createGain();
+    src.buffer = pluckBuffer(f, kind);
+    ng.gain.value = base * (0.9 + Math.random()*0.2);
+    src.connect(ng); ng.connect(sg);
+    const st = t + i*stagger + Math.random()*0.002;
+    src.start(st);
+    if (mute) src.stop(st + 0.12);
+  });
 }
 
 /* ---------- chords ---------- */
@@ -336,7 +424,8 @@ function showChords(loops, i, counting){
   $("ncap").textContent = warn ? "switch next!" : "next chord";
 }
 
-function playChuck(t){
+function playChuck(t, chord){
+  if (S.sound !== "simple") playReal("d", t, chord, true);   // muted, dead-string strum of the chord
   // muted, percussive slap: short band-passed noise burst plus a dull thump
   const len = Math.floor(ctx.sampleRate*0.07), buf = ctx.createBuffer(1, len, ctx.sampleRate), d = buf.getChannelData(0);
   for (let i=0;i<len;i++) d[i] = (Math.random()*2-1) * (1 - i/len);
@@ -363,8 +452,9 @@ function schedule(){
     const c = S.pattern[idx];
     const isBeat = idx%2===0;
     if (S.click && isBeat) tone(idx%8===0?1500:1000, nextTime, 0.03, "square", 0.06);
-    if (S.strum && c==="c") playChuck(nextTime);
-    else if (S.strum && c!=="-") playStrum(c, nextTime, S.chords.length ? S.chords[Math.floor(loops / S.cbars) % S.chords.length] : null);
+    const cname = S.chords.length ? S.chords[Math.floor(loops / S.cbars) % S.chords.length] : null;
+    if (S.strum && c==="c") playChuck(nextTime, cname);
+    else if (S.strum && c!=="-") playStrum(c, nextTime, cname);
     events.push({t:nextTime, kind:"step", idx, loops});
     nextTime += 60 / S.bpm / 2;
     idx++;
@@ -416,6 +506,8 @@ async function start(){
   if (!S.pattern.length) return;
   ctx = ctx || new (window.AudioContext || window.webkitAudioContext)();
   await ctx.resume();
+  if (S.sound !== "simple") warmUp();
+  lastStrum = null;
   paused = false; $("pause").textContent = "Pause";
   events = []; idx = 0; loops = 0; countLeft = S.countin ? 4 : 0;
   nextTime = ctx.currentTime + 0.1;
@@ -451,7 +543,7 @@ document.addEventListener("keydown", e => {
   else if (e.key==="Escape") stop();
 });
 
-setBpm(S.bpm); syncTrainer(); renderPattern(); renderChordSetup();
+setBpm(S.bpm); syncSound(); syncTrainer(); renderPattern(); renderChordSetup();
 })();
 </script>
 </body>
