@@ -1,0 +1,433 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Strum Trainer</title>
+<style>
+:root{
+  --bg:#14161c; --panel:#1d2029; --line:#2d3140; --text:#eceef4; --muted:#9097ab;
+  --down:#ff9f43; --up:#4dabf7; --rest:#5b6175; --ok:#51cf66; --chuck:#e599f7;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;line-height:1.4}
+main{max-width:760px;margin:0 auto;padding:24px 16px 60px}
+h1{font-size:26px;margin:0 0 4px}
+.sub{color:var(--muted);margin:0 0 24px}
+section{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px;margin-bottom:16px}
+h2{font-size:13px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:0 0 12px}
+input[type=text]{width:100%;background:var(--bg);border:1px solid var(--line);color:var(--text);border-radius:10px;padding:12px 14px;font-size:18px;letter-spacing:.05em}
+input[type=text]:focus{outline:2px solid var(--up);border-color:transparent}
+button{font:inherit;color:var(--text);background:var(--line);border:0;border-radius:10px;padding:10px 14px;cursor:pointer}
+button:hover{filter:brightness(1.15)}
+button:focus-visible,input:focus-visible{outline:2px solid var(--up);outline-offset:2px}
+.row{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px;align-items:center}
+.pad{font-size:20px;min-width:64px}
+.pad.d{background:var(--down);color:#1b1206}
+.pad.u{background:var(--up);color:#06131f}
+.pad.c{background:var(--chuck);color:#1c0a22}
+.cell.c .g{color:var(--chuck)}
+.hint{color:var(--muted);font-size:13px;margin:10px 0 0}
+.strip{display:flex;flex-wrap:wrap;gap:8px}
+.cell{width:52px;text-align:center;border-radius:10px;padding:6px 0 4px;background:var(--bg);border:2px solid var(--line);cursor:pointer;user-select:none}
+.cell .g{font-size:26px;line-height:1.1;display:block}
+.cell .l{font-size:11px;color:var(--muted)}
+.cell.d .g{color:var(--down)} .cell.u .g{color:var(--up)} .cell.r .g{color:var(--rest)}
+.cell.now{border-color:#fff;background:#2a2f3f;transform:scale(1.08)}
+.cell.beat .l{color:var(--text);font-weight:700}
+.presets button{font-size:14px;padding:8px 12px}
+label.opt{display:flex;align-items:center;gap:8px;margin:6px 0}
+input[type=range]{width:100%;accent-color:var(--up)}
+.bpmline{display:flex;justify-content:space-between;align-items:baseline}
+.bpmnum{font-size:34px;font-weight:700}
+.tag{color:var(--muted)}
+.grid2{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.grid2 label{font-size:13px;color:var(--muted);display:block}
+.grid2 input[type=number]{width:100%;margin-top:4px;background:var(--bg);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:8px;font-size:16px}
+.go{width:100%;font-size:22px;font-weight:700;padding:18px;background:var(--ok);color:#06210d}
+
+/* ---------- stage ---------- */
+#stage{position:fixed;inset:0;background:var(--bg);display:none;flex-direction:column;z-index:10;padding:16px 16px 12px}
+#stage.on{display:flex}
+#top{display:flex;justify-content:space-between;align-items:center;color:var(--muted);font-size:clamp(14px,2.4vw,20px)}
+#center{flex:1;min-height:0;display:flex;align-items:center;justify-content:center;gap:5vw;position:relative}
+#main{display:flex;flex-direction:column;align-items:center;gap:1vh;min-width:0}
+#big{height:min(52vh,52vw);width:min(52vh,52vw)}
+#big svg{width:100%;height:100%;display:block;overflow:visible}
+#word{font-size:clamp(28px,6vw,64px);font-weight:800;letter-spacing:.12em}
+#beat{font-size:clamp(40px,9vw,110px);font-weight:800;line-height:1}
+#next{display:flex;flex-direction:column;align-items:center;gap:6px;opacity:.55;color:var(--muted);font-size:14px}
+#next svg{width:min(14vh,14vw);height:min(14vh,14vw)}
+#countin{position:absolute;inset:0;display:none;align-items:center;justify-content:center;font-size:min(40vh,40vw);font-weight:800;background:var(--bg)}
+.pulse{animation:pulse .18s ease-out}
+@keyframes pulse{from{transform:scale(1.12)}to{transform:scale(1)}}
+#sstrip{justify-content:center;margin:8px 0}
+#sstrip .cell{width:clamp(44px,7vw,84px)}
+#sstrip .cell .g{font-size:clamp(22px,4vw,42px)}
+#bar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:center}
+#bar input[type=range]{width:min(320px,40vw)}
+#bar .n{font-size:20px;font-weight:700;min-width:110px;text-align:center}
+.dim{opacity:.35}
+.cwrap{display:flex;flex-direction:column;align-items:center;gap:4px;min-width:0}
+.cname{font-size:clamp(28px,7vw,84px);font-weight:800;line-height:1}
+.cwrap svg{width:min(26vh,26vw);height:auto}
+.cwrap .cap{color:var(--muted);font-size:14px;text-transform:uppercase;letter-spacing:.1em}
+#chordbox{display:none}
+#chordbox.on{display:flex}
+#nextchord{display:none;opacity:.7;border:2px solid transparent;border-radius:14px;padding:6px 10px}
+#nextchord.on{display:flex}
+#nextchord.warn{opacity:1;border-color:var(--ok);background:#1c2b22}
+#nextchord .cname{font-size:clamp(22px,4vw,48px)}
+#nextchord svg{width:min(15vh,15vw)}
+.nostuff{color:var(--muted);font-size:13px}
+</style>
+</head>
+<body>
+<main>
+  <h1>Strum Trainer</h1>
+  <p class="sub">Set a strumming pattern, pick a tempo, and follow big arrows in full screen.</p>
+
+  <section>
+    <h2>1 · Your pattern</h2>
+    <input type="text" id="txt" placeholder='e.g. down up up down down up  or  DUUDDU' aria-label="Pattern" autocomplete="off" spellcheck="false">
+    <div class="row">
+      <button class="pad d" data-add="d" title="Down">↓</button>
+      <button class="pad u" data-add="u" title="Up">↑</button>
+      <button class="pad c" data-add="c" title="Chuck: muted percussive strum">chuck</button>
+      <button class="pad" data-add="-" title="Silent slot (hand keeps moving)">rest</button>
+      <button id="back">⌫</button>
+      <button id="clear">Clear</button>
+    </div>
+    <div class="row strip" id="pstrip" style="margin-top:14px"></div>
+    <p class="hint">Each symbol is one half-beat (an eighth note). Use <b>D</b>, <b>U</b>, <b>X</b> or <b>C</b> for a chuck (muted, percussive strum: lay your palm across the strings as you strike), and <b>-</b> for a silent slot. Click a box above to cycle it. Numbers under boxes are the count: 1 &amp; 2 &amp; 3 &amp; 4 &amp;.</p>
+    <div class="row presets" id="presets"></div>
+  </section>
+
+  <section>
+    <h2>2 · Chords (optional)</h2>
+    <input type="text" id="ctxt" placeholder="e.g. C Am F G" aria-label="Chord progression" autocomplete="off" spellcheck="false">
+    <div class="row" id="cstrip"></div>
+    <div class="row"><label class="tag" for="cbars">Change chord every</label>
+      <input type="number" id="cbars" min="1" max="8" value="1" style="width:64px;background:var(--bg);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:8px;font-size:16px">
+      <span class="tag">loop(s) of the pattern</span></div>
+    <div class="row presets" id="cpresets"></div>
+    <p class="hint">Leave empty to practise the strum only. Diagrams are for standard GCEA ukulele tuning.</p>
+  </section>
+
+  <section>
+    <h2>3 · Speed</h2>
+    <div class="bpmline"><span><span class="bpmnum" id="bpmnum">60</span> <span class="tag">BPM</span></span><span class="tag" id="bpmname">Easy</span></div>
+    <input type="range" id="bpm" min="30" max="200" value="60" aria-label="Tempo in BPM">
+    <div class="row"><button data-bpm="-5">−5</button><button data-bpm="5">+5</button><span class="tag">Start slow. If you can do 4 clean loops, go up 5.</span></div>
+  </section>
+
+  <section>
+    <h2>4 · Options</h2>
+    <label class="opt"><input type="checkbox" id="click" checked> Metronome click</label>
+    <label class="opt"><input type="checkbox" id="strum" checked> Strum sound</label>
+    <label class="opt"><input type="checkbox" id="countin" checked> 4-beat count-in</label>
+    <label class="opt"><input type="checkbox" id="ghost" checked> Show air-strum arrow on rests</label>
+    <label class="opt"><input type="checkbox" id="trainer"> Speed trainer: speed up automatically</label>
+    <div class="grid2" id="trainopts">
+      <label>+ BPM<input type="number" id="tstep" min="1" max="30" value="5"></label>
+      <label>every N loops<input type="number" id="tevery" min="1" max="32" value="4"></label>
+      <label>up to BPM<input type="number" id="tmax" min="40" max="240" value="100"></label>
+    </div>
+  </section>
+
+  <button class="go" id="start">▶ Start (full screen)</button>
+</main>
+
+<div id="stage" aria-live="off">
+  <div id="top"><span id="sbpm"></span><span id="sloop"></span></div>
+  <div id="center">
+    <div id="chordbox" class="cwrap"><span class="cap">chord</span><div class="cname" id="cname"></div><div id="cdia"></div></div>
+    <div id="main">
+      <div id="beat"></div>
+      <div id="big"></div>
+      <div id="word"></div>
+    </div>
+    <div id="rightcol" style="display:flex;flex-direction:column;align-items:center;gap:14px">
+      <div id="next"><span>next stroke</span><div id="nextarrow"></div></div>
+      <div id="nextchord" class="cwrap"><span class="cap" id="ncap">next chord</span><div class="cname" id="ncname"></div><div id="ncdia"></div></div>
+    </div>
+    <div id="countin"></div>
+  </div>
+  <div class="strip" id="sstrip"></div>
+  <div id="bar">
+    <button id="sminus">−5</button>
+    <input type="range" id="sbpmrange" min="30" max="200" aria-label="Tempo">
+    <button id="splus">+5</button>
+    <span class="n" id="sbpmnum"></span>
+    <button id="pause">Pause</button>
+    <button id="exit">Exit</button>
+  </div>
+</div>
+
+<script>
+(() => {
+"use strict";
+const $ = id => document.getElementById(id);
+const LABELS = ["1","&","2","&","3","&","4","&"];
+const PRESETS = [
+  ["Your example (D U U D D U)", "d u u d d u"],
+  ["Down only", "d - d - d - d -"],
+  ["Down-up steady", "d u d u d u d u"],
+  ["Folk / island", "d - d u - u d u"],
+  ["Offbeat (reggae)", "- u - u - u - u"],
+  ["Chuck groove", "d c u c d c u c"],
+  ["Chuck + island", "d c d u c u d u"]
+];
+const save = JSON.parse(localStorage.getItem("strum-v1") || "{}");
+const S = Object.assign({pattern:["d","-","d","u","-","u","d","u"], bpm:60, click:true, strum:true, countin:true, ghost:true,
+  chords:["C","Am","F","G"], cbars:1, trainer:false, tstep:5, tevery:4, tmax:100}, save);
+const persist = () => { try{ localStorage.setItem("strum-v1", JSON.stringify(S)); }catch(e){} };
+
+/* ---------- pattern parsing / rendering ---------- */
+function parse(s){
+  s = s.toLowerCase().replace(/chuck|mute/g,"c").replace(/down/g,"d").replace(/up/g,"u").replace(/rest|miss|skip/g,"-").replace(/↓/g,"d").replace(/↑/g,"u");
+  const out = [];
+  for (const ch of s){
+    if (ch==="d") out.push("d");
+    else if (ch==="u") out.push("u");
+    else if (ch==="c" || ch==="x" || ch==="✕") out.push("c");
+    else if ("-_.r".includes(ch)) out.push("-");
+  }
+  return out;
+}
+const fmt = p => p.map(c=>c.toUpperCase()).join(" ");
+const GLYPH = {d:"↓", u:"↑", c:"✕", "-":"–"};
+const CLS = {d:"d", u:"u", c:"c", "-":"r"};
+
+function stripHTML(pattern, interactive){
+  return pattern.map((c,i)=>`<div class="cell ${CLS[c]} ${i%2===0?"beat":""}" data-i="${i}"${interactive?' role="button" tabindex="0"':""}>
+    <span class="g">${GLYPH[c]}</span><span class="l">${LABELS[i%8]}</span></div>`).join("");
+}
+function renderPattern(){
+  $("pstrip").innerHTML = S.pattern.length ? stripHTML(S.pattern, true) : '<span class="tag">Empty. Type or tap above.</span>';
+  if (document.activeElement !== $("txt")) $("txt").value = fmt(S.pattern);
+  $("start").disabled = !S.pattern.length;
+  $("start").style.opacity = S.pattern.length ? 1 : .4;
+  persist();
+}
+$("txt").addEventListener("input", e => { S.pattern = parse(e.target.value); renderPattern(); });
+$("txt").addEventListener("blur", () => { $("txt").value = fmt(S.pattern); });
+document.querySelectorAll("[data-add]").forEach(b => b.onclick = () => { S.pattern.push(b.dataset.add); renderPattern(); });
+$("back").onclick = () => { S.pattern.pop(); renderPattern(); };
+$("clear").onclick = () => { S.pattern = []; renderPattern(); };
+function cycle(e){
+  const c = e.target.closest(".cell"); if (!c) return;
+  if (e.type==="keydown" && e.key!=="Enter" && e.key!==" ") return;
+  const i = +c.dataset.i, order = ["d","u","c","-"];
+  S.pattern[i] = order[(order.indexOf(S.pattern[i])+1)%4];
+  renderPattern();
+}
+$("pstrip").addEventListener("click", cycle);
+$("pstrip").addEventListener("keydown", cycle);
+PRESETS.forEach(([name,p]) => {
+  const b = document.createElement("button"); b.textContent = name;
+  b.onclick = () => { S.pattern = parse(p); renderPattern(); };
+  $("presets").appendChild(b);
+});
+
+/* ---------- tempo & options ---------- */
+function tempoName(b){ return b<50?"Crawl":b<70?"Easy":b<95?"Steady":b<125?"Brisk":b<155?"Fast":"Speedy"; }
+function setBpm(v){
+  S.bpm = Math.max(30, Math.min(200, Math.round(v)));
+  $("bpm").value = S.bpm; $("bpmnum").textContent = S.bpm; $("bpmname").textContent = tempoName(S.bpm);
+  $("sbpmrange").value = S.bpm; $("sbpmnum").textContent = S.bpm+" BPM"; $("sbpm").textContent = S.bpm+" BPM · "+tempoName(S.bpm);
+  persist();
+}
+$("bpm").oninput = e => setBpm(+e.target.value);
+$("sbpmrange").oninput = e => setBpm(+e.target.value);
+document.querySelectorAll("[data-bpm]").forEach(b => b.onclick = () => setBpm(S.bpm + +b.dataset.bpm));
+$("sminus").onclick = () => setBpm(S.bpm-5);
+$("splus").onclick = () => setBpm(S.bpm+5);
+for (const k of ["click","strum","countin","ghost","trainer"]){
+  $(k).checked = S[k]; $(k).onchange = e => { S[k] = e.target.checked; syncTrainer(); persist(); };
+}
+for (const k of ["tstep","tevery","tmax"]){
+  $(k).value = S[k]; $(k).onchange = e => { S[k] = Math.max(1, +e.target.value || 1); persist(); };
+}
+function syncTrainer(){ $("trainopts").classList.toggle("dim", !S.trainer); }
+
+/* ---------- audio ---------- */
+let ctx = null;
+function tone(freq, t, dur, type, vol){
+  const o = ctx.createOscillator(), g = ctx.createGain();
+  o.type = type; o.frequency.value = freq;
+  g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.0001, t+dur);
+  o.connect(g).connect(ctx.destination); o.start(t); o.stop(t+dur+0.02);
+}
+const STRINGS = [392.0, 261.63, 329.63, 440.0]; // G C E A, low-to-high order in hand motion
+function playStrum(dir, t){
+  const order = dir==="d" ? STRINGS : [...STRINGS].reverse();
+  order.forEach((f,i) => tone(f, t+i*0.012, 0.35, "triangle", dir==="d"?0.13:0.09));
+}
+
+/* ---------- chords ---------- */
+// frets on strings G C E A
+const CHORDS = {C:"0003",Cm:"0333",C7:"0001",Cmaj7:"0002",D:"2220",Dm:"2210",D7:"2223",Dm7:"2213",
+  E:"4442",Em:"0432",E7:"1202",Em7:"0202",F:"2010",Fm:"1013",Fmaj7:"2413",G:"0232",Gm:"0231",G7:"0212",
+  A:"2100",Am:"2000",A7:"0100",Am7:"0000",B:"4322",Bm:"4222",B7:"2322",Bb:"3211"};
+const CPRESETS = [["C Am F G","C Am F G"],["C G Am F","C G Am F"],["Am F C G","Am F C G"],["G D Em C","G D Em C"],["C F G7 C","C F G7 C"],["C ↔ G (easy start)","C G"]];
+function parseChords(s){
+  return s.split(/[\s,|>-]+/).filter(Boolean).map(t => t[0].toUpperCase()+t.slice(1)).slice(0,24);
+}
+function chordSVG(name){
+  const f = CHORDS[name];
+  if (!f) return '<div class="nostuff">no diagram</div>';
+  const xs=[15,32,49,66], top=22, gap=17, rows=4;
+  let g = "";
+  for (let i=0;i<4;i++) g += `<line x1="${xs[i]}" y1="${top}" x2="${xs[i]}" y2="${top+rows*gap}" stroke="#8a90a5" stroke-width="1.5"/>`;
+  for (let r=0;r<=rows;r++) g += `<line x1="${xs[0]}" y1="${top+r*gap}" x2="${xs[3]}" y2="${top+r*gap}" stroke="${r===0?"#eceef4":"#3a3f52"}" stroke-width="${r===0?4:1.5}"/>`;
+  for (let i=0;i<4;i++){
+    const n = +f[i];
+    if (n===0) g += `<circle cx="${xs[i]}" cy="12" r="4.5" fill="none" stroke="#eceef4" stroke-width="1.6"/>`;
+    else g += `<circle cx="${xs[i]}" cy="${top+(n-0.5)*gap}" r="6.5" fill="var(--down)"/>`;
+  }
+  return `<svg viewBox="0 0 80 ${top+rows*gap+4}" aria-label="${name} chord diagram">${g}</svg>`;
+}
+function renderChordSetup(){
+  $("cstrip").innerHTML = S.chords.map(c => `<div class="cwrap" style="background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:6px 10px"><b>${c}</b><div style="width:52px">${chordSVG(c)}</div></div>`).join("");
+  if (document.activeElement !== $("ctxt")) $("ctxt").value = S.chords.join(" ");
+  persist();
+}
+$("ctxt").addEventListener("input", e => { S.chords = parseChords(e.target.value); renderChordSetup(); });
+$("ctxt").addEventListener("blur", () => { $("ctxt").value = S.chords.join(" "); });
+$("cbars").value = S.cbars; $("cbars").onchange = e => { S.cbars = Math.max(1, Math.min(8, +e.target.value||1)); persist(); };
+CPRESETS.forEach(([label,p]) => { const b=document.createElement("button"); b.textContent=label; b.onclick=()=>{S.chords=parseChords(p);renderChordSetup();}; $("cpresets").appendChild(b); });
+function showChords(loops, i, counting){
+  const n = S.chords.length;
+  $("chordbox").classList.toggle("on", n>0); $("nextchord").classList.toggle("on", n>1);
+  if (!n) return;
+  const ci = Math.floor(loops / S.cbars) % n;
+  const cur = S.chords[ci], nxt = S.chords[(ci+1)%n];
+  $("cname").textContent = cur; $("cdia").innerHTML = chordSVG(cur);
+  $("ncname").textContent = nxt; $("ncdia").innerHTML = chordSVG(nxt);
+  const lastLoop = (loops+1) % S.cbars === 0;
+  const warn = !counting && lastLoop && i >= S.pattern.length/2;
+  $("nextchord").classList.toggle("warn", warn);
+  $("ncap").textContent = warn ? "switch next!" : "next chord";
+}
+
+function playChuck(t){
+  // muted, percussive slap: short band-passed noise burst plus a dull thump
+  const len = Math.floor(ctx.sampleRate*0.07), buf = ctx.createBuffer(1, len, ctx.sampleRate), d = buf.getChannelData(0);
+  for (let i=0;i<len;i++) d[i] = (Math.random()*2-1) * (1 - i/len);
+  const src = ctx.createBufferSource(), f = ctx.createBiquadFilter(), g = ctx.createGain();
+  src.buffer = buf; f.type = "bandpass"; f.frequency.value = 1600; f.Q.value = 0.9;
+  g.gain.setValueAtTime(0.5, t); g.gain.exponentialRampToValueAtTime(0.0001, t+0.07);
+  src.connect(f).connect(g).connect(ctx.destination); src.start(t);
+  tone(180, t, 0.05, "sine", 0.12);
+}
+
+/* ---------- engine ---------- */
+let running = false, timer = null, raf = null, events = [], nextTime = 0, idx = 0, countLeft = 0, loops = 0, paused = false;
+
+function schedule(){
+  while (nextTime < ctx.currentTime + 0.15){
+    if (countLeft > 0){
+      const n = 5 - countLeft;
+      if (S.click) tone(n===1?1500:1000, nextTime, 0.04, "square", 0.08);
+      events.push({t:nextTime, kind:"count", n});
+      countLeft--;
+      nextTime += 60 / S.bpm;
+      continue;
+    }
+    const c = S.pattern[idx];
+    const isBeat = idx%2===0;
+    if (S.click && isBeat) tone(idx%8===0?1500:1000, nextTime, 0.03, "square", 0.06);
+    if (S.strum && c==="c") playChuck(nextTime);
+    else if (S.strum && c!=="-") playStrum(c, nextTime);
+    events.push({t:nextTime, kind:"step", idx, loops});
+    nextTime += 60 / S.bpm / 2;
+    idx++;
+    if (idx >= S.pattern.length){
+      idx = 0; loops++;
+      if (S.trainer && loops % S.tevery === 0 && S.bpm < S.tmax) setBpm(Math.min(S.tmax, S.bpm + S.tstep));
+    }
+  }
+}
+function arrowSVG(dir, ghost){
+  if (dir==="c") return `<svg viewBox="0 0 100 100" aria-hidden="true"><g stroke="var(--chuck)" stroke-width="16" stroke-linecap="round"><path d="M22 22L78 78M78 22L22 78"/></g></svg>`;
+  const col = dir==="d" ? "var(--down)" : "var(--up)";
+  const rot = dir==="u" ? ' transform="rotate(180 50 50)"' : "";
+  return `<svg viewBox="0 0 100 100" aria-hidden="true"><g${rot} fill="${col}" ${ghost?'opacity=".28"':""}>
+    <path d="M38 6h24v46h20L50 94 18 52h20z"/></g></svg>`;
+}
+function show(ev){
+  if (ev.kind==="count"){
+    $("countin").style.display = "flex"; $("countin").textContent = ev.n;
+    showChords(0, 0, true);
+    return;
+  }
+  $("countin").style.display = "none";
+  const i = ev.idx, c = S.pattern[i], hand = i%2===0 ? "d" : "u";
+  const el = $("big"), word = $("word");
+  if (c==="-"){
+    el.innerHTML = S.ghost ? arrowSVG(hand, true) : "";
+    word.textContent = "REST"; word.style.color = "var(--rest)";
+  } else {
+    el.innerHTML = arrowSVG(c, false);
+    word.textContent = c==="d" ? "DOWN" : c==="u" ? "UP" : "CHUCK";
+    word.style.color = c==="d" ? "var(--down)" : c==="u" ? "var(--up)" : "var(--chuck)";
+  }
+  $("beat").textContent = LABELS[i%8];
+  $("beat").style.color = i%2===0 ? "var(--text)" : "var(--muted)";
+  el.classList.remove("pulse"); void el.offsetWidth; if (c!=="-") el.classList.add("pulse");
+  const nx = S.pattern[(i+1)%S.pattern.length], nh = (i+1)%2===0 ? "d" : "u";
+  $("nextarrow").innerHTML = nx==="-" ? (S.ghost ? arrowSVG(nh,true) : '<span>rest</span>') : arrowSVG(nx,false);
+  document.querySelectorAll("#sstrip .cell").forEach((cell,k) => cell.classList.toggle("now", k===i));
+  $("sloop").textContent = "Loop " + (ev.loops+1);
+  showChords(ev.loops, i, false);
+}
+function frame(){
+  if (!running) return;
+  while (events.length && events[0].t <= ctx.currentTime) show(events.shift());
+  raf = requestAnimationFrame(frame);
+}
+async function start(){
+  if (!S.pattern.length) return;
+  ctx = ctx || new (window.AudioContext || window.webkitAudioContext)();
+  await ctx.resume();
+  paused = false; $("pause").textContent = "Pause";
+  events = []; idx = 0; loops = 0; countLeft = S.countin ? 4 : 0;
+  nextTime = ctx.currentTime + 0.1;
+  $("sstrip").innerHTML = stripHTML(S.pattern, false);
+  $("big").innerHTML = ""; $("word").textContent = ""; $("beat").textContent = ""; $("nextarrow").innerHTML = "";
+  $("stage").classList.add("on");
+  try{ await $("stage").requestFullscreen(); }catch(e){}
+  running = true;
+  timer = setInterval(schedule, 25);
+  frame();
+}
+function stop(){
+  running = false; clearInterval(timer); cancelAnimationFrame(raf);
+  $("stage").classList.remove("on");
+  if (document.fullscreenElement) document.exitFullscreen().catch(()=>{});
+  if (ctx && ctx.state==="suspended") ctx.resume();
+}
+function togglePause(){
+  if (!running) return;
+  paused = !paused;
+  if (paused) ctx.suspend(); else ctx.resume();
+  $("pause").textContent = paused ? "Resume" : "Pause";
+}
+$("start").onclick = start;
+$("exit").onclick = stop;
+$("pause").onclick = togglePause;
+document.addEventListener("fullscreenchange", () => { if (!document.fullscreenElement && running) stop(); });
+document.addEventListener("keydown", e => {
+  if (!running) return;
+  if (e.key===" ") { e.preventDefault(); togglePause(); }
+  else if (e.key==="ArrowUp") { e.preventDefault(); setBpm(S.bpm+5); }
+  else if (e.key==="ArrowDown") { e.preventDefault(); setBpm(S.bpm-5); }
+  else if (e.key==="Escape") stop();
+});
+
+setBpm(S.bpm); syncTrainer(); renderPattern(); renderChordSetup();
+})();
+</script>
+</body>
+</html>
