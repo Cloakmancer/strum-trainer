@@ -27,6 +27,9 @@ button:focus-visible,input:focus-visible{outline:2px solid var(--up);outline-off
 .pad.u{background:var(--up);color:#06131f}
 .pad.c{background:var(--chuck);color:#1c0a22}
 .cell.c .g{color:var(--chuck)}
+#cstrip .cwrap{flex:0 0 auto}
+#cstrip .cwrap svg{width:64px}
+.seg.on{background:var(--up);color:#06131f;font-weight:700}
 .hint{color:var(--muted);font-size:13px;margin:10px 0 0}
 .strip{display:flex;flex-wrap:wrap;gap:8px}
 .cell{width:52px;text-align:center;border-radius:10px;padding:6px 0 4px;background:var(--bg);border:2px solid var(--line);cursor:pointer;user-select:none}
@@ -105,13 +108,16 @@ input[type=range]{width:100%;accent-color:var(--up)}
 
   <section>
     <h2>2 · Chords (optional)</h2>
+    <div class="row" role="group" aria-label="Instrument" style="margin:0 0 12px">
+      <button id="iuke" class="seg">Ukulele</button><button id="igtr" class="seg">Guitar</button>
+    </div>
     <input type="text" id="ctxt" placeholder="e.g. C Am F G" aria-label="Chord progression" autocomplete="off" spellcheck="false">
     <div class="row" id="cstrip"></div>
     <div class="row"><label class="tag" for="cbars">Change chord every</label>
       <input type="number" id="cbars" min="1" max="8" value="1" style="width:64px;background:var(--bg);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:8px;font-size:16px">
       <span class="tag">loop(s) of the pattern</span></div>
     <div class="row presets" id="cpresets"></div>
-    <p class="hint">Leave empty to practise the strum only. Diagrams are for standard GCEA ukulele tuning.</p>
+    <p class="hint">Leave empty to practise the strum only. <span id="tuning"></span></p>
   </section>
 
   <section>
@@ -180,7 +186,7 @@ const PRESETS = [
 ];
 const save = JSON.parse(localStorage.getItem("strum-v1") || "{}");
 const S = Object.assign({pattern:["d","-","d","u","-","u","d","u"], bpm:60, click:true, strum:true, countin:true, ghost:true,
-  chords:["C","Am","F","G"], cbars:1, trainer:false, tstep:5, tevery:4, tmax:100}, save);
+  instrument:"uke", chords:["C","Am","F","G"], cbars:1, trainer:false, tstep:5, tevery:4, tmax:100}, save);
 const persist = () => { try{ localStorage.setItem("strum-v1", JSON.stringify(S)); }catch(e){} };
 
 /* ---------- pattern parsing / rendering ---------- */
@@ -259,40 +265,59 @@ function tone(freq, t, dur, type, vol){
   g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.0001, t+dur);
   o.connect(g).connect(ctx.destination); o.start(t); o.stop(t+dur+0.02);
 }
-const STRINGS = [392.0, 261.63, 329.63, 440.0]; // G C E A, low-to-high order in hand motion
-function playStrum(dir, t){
-  const order = dir==="d" ? STRINGS : [...STRINGS].reverse();
-  order.forEach((f,i) => tone(f, t+i*0.012, 0.35, "triangle", dir==="d"?0.13:0.09));
+// open-string pitches (Hz) in string order: uke G C E A, guitar E A D G B E
+const OPEN = {uke:[392.0, 261.63, 329.63, 440.0], gtr:[82.41, 110.0, 146.83, 196.0, 246.94, 329.63]};
+function playStrum(dir, t, chord){
+  const open = OPEN[S.instrument], frets = (chordLib()[chord] || "0".repeat(open.length));
+  const notes = [];
+  open.forEach((f,i) => { if (frets[i] !== "x") notes.push(f * Math.pow(2, +frets[i]/12)); });
+  const order = dir==="d" ? notes : notes.reverse();
+  const vol = (dir==="d" ? 0.13 : 0.09) * Math.min(1, 4/Math.max(order.length,1) + 0.25);
+  order.forEach((f,i) => tone(f, t+i*(S.instrument==="gtr"?0.009:0.012), 0.4, "triangle", vol));
 }
 
 /* ---------- chords ---------- */
-// frets on strings G C E A
-const CHORDS = {C:"0003",Cm:"0333",C7:"0001",Cmaj7:"0002",D:"2220",Dm:"2210",D7:"2223",Dm7:"2213",
+// frets per string (x = muted): uke G C E A; guitar low E A D G B high e
+const CHORDS_UKE = {C:"0003",Cm:"0333",C7:"0001",Cmaj7:"0002",D:"2220",Dm:"2210",D7:"2223",Dm7:"2213",
   E:"4442",Em:"0432",E7:"1202",Em7:"0202",F:"2010",Fm:"1013",Fmaj7:"2413",G:"0232",Gm:"0231",G7:"0212",
   A:"2100",Am:"2000",A7:"0100",Am7:"0000",B:"4322",Bm:"4222",B7:"2322",Bb:"3211"};
+const CHORDS_GTR = {C:"x32010",Cm:"x35543",C7:"x32310",Cmaj7:"x32000",D:"xx0232",Dm:"xx0231",D7:"xx0212",Dm7:"xx0211",
+  E:"022100",Em:"022000",E7:"020100",Em7:"022030",F:"133211",Fm:"133111",Fmaj7:"xx3210",G:"320003",Gm:"355333",G7:"320001",
+  A:"x02220",Am:"x02210",A7:"x02020",Am7:"x02010",B:"x24442",Bm:"x24432",B7:"x21202",Bb:"x13331"};
+const chordLib = () => S.instrument==="gtr" ? CHORDS_GTR : CHORDS_UKE;
 const CPRESETS = [["C Am F G","C Am F G"],["C G Am F","C G Am F"],["Am F C G","Am F C G"],["G D Em C","G D Em C"],["C F G7 C","C F G7 C"],["C ↔ G (easy start)","C G"]];
 function parseChords(s){
   return s.split(/[\s,|>-]+/).filter(Boolean).map(t => t[0].toUpperCase()+t.slice(1)).slice(0,24);
 }
 function chordSVG(name){
-  const f = CHORDS[name];
+  const f = chordLib()[name];
   if (!f) return '<div class="nostuff">no diagram</div>';
-  const xs=[15,32,49,66], top=22, gap=17, rows=4;
+  const ns = f.length, x0 = 15, x1 = 66, top = 22, gap = 17, rows = 4;
+  const xs = Array.from({length:ns}, (_,i) => x0 + i*(x1-x0)/(ns-1));
+  const fretted = [...f].filter(c => c!=="x" && c!=="0").map(Number);
+  const base = fretted.length && Math.max(...fretted) > rows ? Math.min(...fretted) : 1;
+  const r = ns===4 ? 6.5 : 5;
   let g = "";
-  for (let i=0;i<4;i++) g += `<line x1="${xs[i]}" y1="${top}" x2="${xs[i]}" y2="${top+rows*gap}" stroke="#8a90a5" stroke-width="1.5"/>`;
-  for (let r=0;r<=rows;r++) g += `<line x1="${xs[0]}" y1="${top+r*gap}" x2="${xs[3]}" y2="${top+r*gap}" stroke="${r===0?"#eceef4":"#3a3f52"}" stroke-width="${r===0?4:1.5}"/>`;
-  for (let i=0;i<4;i++){
-    const n = +f[i];
-    if (n===0) g += `<circle cx="${xs[i]}" cy="12" r="4.5" fill="none" stroke="#eceef4" stroke-width="1.6"/>`;
-    else g += `<circle cx="${xs[i]}" cy="${top+(n-0.5)*gap}" r="6.5" fill="var(--down)"/>`;
+  for (let i=0;i<ns;i++) g += `<line x1="${xs[i]}" y1="${top}" x2="${xs[i]}" y2="${top+rows*gap}" stroke="#8a90a5" stroke-width="1.5"/>`;
+  for (let k=0;k<=rows;k++) g += `<line x1="${x0}" y1="${top+k*gap}" x2="${x1}" y2="${top+k*gap}" stroke="${k===0&&base===1?"#eceef4":"#3a3f52"}" stroke-width="${k===0&&base===1?4:1.5}"/>`;
+  if (base>1) g += `<text x="${x1+6}" y="${top+gap*0.7}" font-size="11" fill="#9097ab" font-family="sans-serif">${base}fr</text>`;
+  for (let i=0;i<ns;i++){
+    const c = f[i];
+    if (c==="x") g += `<path d="M${xs[i]-4} 8L${xs[i]+4} 16M${xs[i]+4} 8L${xs[i]-4} 16" stroke="#9097ab" stroke-width="1.6" stroke-linecap="round"/>`;
+    else if (c==="0") g += `<circle cx="${xs[i]}" cy="12" r="4.5" fill="none" stroke="#eceef4" stroke-width="1.6"/>`;
+    else g += `<circle cx="${xs[i]}" cy="${top+(+c-base+0.5)*gap}" r="${r}" fill="var(--down)"/>`;
   }
-  return `<svg viewBox="0 0 80 ${top+rows*gap+4}" aria-label="${name} chord diagram">${g}</svg>`;
+  return `<svg viewBox="0 0 90 ${top+rows*gap+4}" aria-label="${name} chord diagram">${g}</svg>`;
 }
 function renderChordSetup(){
   $("cstrip").innerHTML = S.chords.map(c => `<div class="cwrap" style="background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:6px 10px"><b>${c}</b><div style="width:52px">${chordSVG(c)}</div></div>`).join("");
   if (document.activeElement !== $("ctxt")) $("ctxt").value = S.chords.join(" ");
+  $("tuning").textContent = S.instrument==="gtr" ? "Diagrams are for standard guitar tuning (E A D G B e); × = muted string." : "Diagrams are for standard GCEA ukulele tuning.";
+  $("iuke").classList.toggle("on", S.instrument!=="gtr"); $("igtr").classList.toggle("on", S.instrument==="gtr");
+  $("iuke").setAttribute("aria-pressed", S.instrument!=="gtr"); $("igtr").setAttribute("aria-pressed", S.instrument==="gtr");
   persist();
 }
+for (const [id,v] of [["iuke","uke"],["igtr","gtr"]]) $(id).onclick = () => { S.instrument = v; renderChordSetup(); };
 $("ctxt").addEventListener("input", e => { S.chords = parseChords(e.target.value); renderChordSetup(); });
 $("ctxt").addEventListener("blur", () => { $("ctxt").value = S.chords.join(" "); });
 $("cbars").value = S.cbars; $("cbars").onchange = e => { S.cbars = Math.max(1, Math.min(8, +e.target.value||1)); persist(); };
@@ -339,7 +364,7 @@ function schedule(){
     const isBeat = idx%2===0;
     if (S.click && isBeat) tone(idx%8===0?1500:1000, nextTime, 0.03, "square", 0.06);
     if (S.strum && c==="c") playChuck(nextTime);
-    else if (S.strum && c!=="-") playStrum(c, nextTime);
+    else if (S.strum && c!=="-") playStrum(c, nextTime, S.chords.length ? S.chords[Math.floor(loops / S.cbars) % S.chords.length] : null);
     events.push({t:nextTime, kind:"step", idx, loops});
     nextTime += 60 / S.bpm / 2;
     idx++;
