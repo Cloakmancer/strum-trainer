@@ -41,6 +41,8 @@ textarea:focus-visible{outline:2px solid var(--up)}
 .song .sg{display:inline-flex;flex-direction:column}
 .song .ch{align-self:flex-start;color:var(--down);font-weight:800;font-size:.85em;padding:0 .3em 0 0;border-radius:6px;min-height:1.25em}
 .song .tx{white-space:pre;padding-right:.05em}
+.song .bt{font-style:normal;font-weight:600;font-size:.72em;color:var(--muted);margin-left:.25em;vertical-align:.15em}
+#lyr .bt{display:none}
 .song .sg:has(.tx:only-child) {}
 #lyr{flex:0 0 auto;overflow:auto;height:min(30vh,240px);width:min(960px,100%);margin:6px auto 4px;font-size:clamp(17px,2.7vw,30px);padding:4px 10px;scroll-behavior:smooth}
 #lyr .ln{opacity:.4}
@@ -138,7 +140,7 @@ input[type=range]{width:100%;accent-color:var(--up)}
     <div class="row" id="cstrip"></div>
     <div class="row"><label class="tag" for="cbars">Change chord every</label>
       <input type="number" id="cbars" min="1" max="8" value="1" style="width:64px;background:var(--bg);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:8px;font-size:16px">
-      <span class="tag">loop(s) of the pattern</span></div>
+      <span class="tag">loop(s) of the pattern — used when no song is loaded</span></div>
     <div class="row presets" id="cpresets"></div>
     <p class="hint">Leave empty to practise the strum only. <span id="tuning"></span></p>
   </section>
@@ -150,10 +152,21 @@ input[type=range]{width:100%;accent-color:var(--up)}
       <button id="lyrex">Load example</button><button id="lyrclear">Clear</button>
       <span class="tag" id="songinfo"></span>
     </div>
-    <label class="opt"><input type="checkbox" id="songon"> Follow this song in full screen (chords come from the song, one per change)</label>
+    <label class="opt"><input type="checkbox" id="songon"> Follow this song in full screen (each chord lasts as long as the song says)</label>
+    <div class="row"><label class="tag" for="pace">Lyric pace</label>
+      <select id="pace" style="background:var(--bg);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:8px;font-size:16px">
+        <option value="0.5">Slow — about 1 word every 2 beats</option>
+        <option value="1">Normal — about 1 syllable per beat</option>
+        <option value="2">Fast — about 2 syllables per beat</option>
+      </select>
+      <span class="tag">only affects lines without bar marks</span></div>
     <div class="row" id="songchords"></div>
     <div class="song" id="lyrprev"></div>
-    <p class="hint">Put chords on their own line directly above the lyric line, lined up with the word where you change. <b>[Verse]</b> / <b>[Chorus]</b> lines become headings. Each chord in the song is one change, and the "Change chord every N loops" setting above sets how long each lasts.</p>
+    <p class="hint">The small grey number after each chord is how many beats it will last. One bar = one loop of your pattern.<br>
+      <b>Lined-up chords</b> — put them above the lyric line over the word where you change. Each chord's length is worked out from the syllables it sits over, so a chord held over a long phrase lasts longer.<br>
+      <b>Bar marks</b> — for exact timing, write the line as bars: <code>| C | C | Am | F G |</code>. Chords inside one bar split it evenly and <code>.</code> holds the one before it (<code>| C . . G |</code>). A lyric line can still sit underneath.<br>
+      <b>Fixing one chord</b> — add a colon and the number of beats to any chord in either style: <code>F:2</code>, <code>G:1.5</code>.<br>
+      <b>[Verse]</b> / <b>[Chorus]</b> lines become headings.</p>
   </section>
 
   <section>
@@ -226,7 +239,7 @@ const PRESETS = [
 ];
 const save = JSON.parse(localStorage.getItem("strum-v1") || "{}");
 const S = Object.assign({pattern:["d","-","d","u","-","u","d","u"], bpm:60, click:true, strum:true, countin:true, ghost:true,
-  instrument:"uke", sound:"real", song:"", songOn:false, chords:["C","Am","F","G"], cbars:1, trainer:false, tstep:5, tevery:4, tmax:100}, save);
+  instrument:"uke", sound:"real", song:"", songOn:false, chords:["C","Am","F","G"], cbars:1, pace:1, trainer:false, tstep:5, tevery:4, tmax:100}, save);
 const persist = () => { try{ localStorage.setItem("strum-v1", JSON.stringify(S)); }catch(e){} };
 
 /* ---------- pattern parsing / rendering ---------- */
@@ -254,6 +267,8 @@ function renderPattern(){
   if (document.activeElement !== $("txt")) $("txt").value = fmt(S.pattern);
   $("start").disabled = !S.pattern.length;
   $("start").style.opacity = S.pattern.length ? 1 : .4;
+  // A bar is one loop of the pattern, so changing its length re-times the song.
+  if (typeof refreshSong === "function" && $("lyrprev")) refreshSong();
   persist();
 }
 $("txt").addEventListener("input", e => { S.pattern = parse(e.target.value); renderPattern(); });
@@ -446,11 +461,54 @@ function renderChordSetup(){
 for (const [id,v] of [["iuke","uke"],["igtr","gtr"]]) $(id).onclick = () => { S.instrument = v; renderChordSetup(); };
 $("ctxt").addEventListener("input", e => { S.chords = parseChords(e.target.value); renderChordSetup(); });
 $("ctxt").addEventListener("blur", () => { $("ctxt").value = S.chords.join(" "); });
-$("cbars").value = S.cbars; $("cbars").onchange = e => { S.cbars = Math.max(1, Math.min(8, +e.target.value||1)); persist(); };
+$("cbars").value = S.cbars; $("cbars").onchange = e => { S.cbars = Math.max(1, Math.min(8, +e.target.value||1)); if (running) TL = buildTL(); persist(); };
 CPRESETS.forEach(([label,p]) => { const b=document.createElement("button"); b.textContent=label; b.onclick=()=>{S.chords=parseChords(p);renderChordSetup();}; $("cpresets").appendChild(b); });
 /* ---------- song / lyrics mode ---------- */
 const CHORD_RE = /^[A-G](#|b)?(m|min|maj|dim|aug|sus[24]?|add\d+)?\d*(\/[A-G](#|b)?)?$/;
 const SECTION_RE = /^\[.*\]$/;
+const HOLD_RE = /^[.%\/]+$/;                       // "hold the chord before me for another slot"
+
+/* ---------- timing ---------- */
+// One bar = one loop of the pattern. 8 eighth-note slots = 4 beats (4/4), 6 slots = 3 beats (3/4).
+const barBeats = () => Math.max(1, S.pattern.length / 2);
+const PACE = {0.5:"Slow (few words)", 1:"Normal", 2:"Fast (wordy)"};
+
+// A chord token may carry an explicit length: "F:2", "G:1.5". Returns null if it is not a chord.
+function chordTok(tok){
+  const m = /^(.*?):(\d+(?:\.\d+)?)$/.exec(tok);
+  const name = m ? m[1] : tok;
+  if (!CHORD_RE.test(name)) return null;
+  return {name, fixed: m ? Math.max(0.5, parseFloat(m[2])) : null};
+}
+function syllables(word){
+  const w = word.toLowerCase().replace(/[^a-z']/g, "");
+  if (!w) return 0;
+  let n = (w.replace(/e$/, "").match(/[aeiouy]+/g) || []).length;
+  if (/[^aeiou]le$/.test(w)) n++;                  // "little", "table"
+  return Math.max(1, n);
+}
+const synCount = s => (s.match(/[A-Za-z']+/g) || []).reduce((a, w) => a + syllables(w), 0);
+
+// Split `total` beats among weighted segments as whole beats, each at least 1, summing exactly to total.
+function share(total, weights){
+  const sum = weights.reduce((a, b) => a + b, 0) || weights.length;
+  const raw = weights.map(w => (w / sum) * total);
+  const out = raw.map(r => Math.max(1, Math.round(r)));
+  let diff = total - out.reduce((a, b) => a + b, 0);
+  let guard = 500;
+  while (diff !== 0 && guard--){
+    let k = -1;
+    if (diff > 0){
+      raw.forEach((r, i) => { if (k < 0 || r - out[i] > raw[k] - out[k]) k = i; });
+      out[k]++; diff--;
+    } else {
+      raw.forEach((r, i) => { if (out[i] > 1 && (k < 0 || out[i] - r > out[k] - raw[k])) k = i; });
+      if (k < 0) break;
+      out[k]--; diff++;
+    }
+  }
+  return out;
+}
 const EXAMPLE_SONG = `[Verse]
 C               Am
 Morning light on the kitchen floor,
@@ -465,33 +523,110 @@ Just a little song for me
 C       G
 Play it slow, play it slow,
 Am      F
-Let the chords go where they go`;
-let SONG = {items:[], seq:[]}, lastOcc = -1;
+Let the chords go where they go
+
+[Bridge — written as bars]
+| C | C | Am | F G |
+| C | F | C:2 G:2 |`;
+let SONG = {items:[], seq:[], timeline:[], totalBeats:0, bars:0}, lastOcc = -1, curName = null, nxtName = null;
 const songActive = () => S.songOn && SONG.seq.length > 0;
 const seq = () => songActive() ? SONG.seq : S.chords;
 const esc = s => s.replace(/[&<>]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));
+const isChordLine = l => {
+  const toks = l.replace(/\|/g, " ").trim().split(/\s+/).filter(Boolean);
+  if (!toks.length) return false;
+  let n = 0;
+  for (const t of toks){ if (HOLD_RE.test(t)) continue; if (!chordTok(t)) return false; n++; }
+  return n > 0;
+};
+// "| C | Am | F G |" — each cell is one bar, chords inside it split the bar evenly, "." holds.
+function barChords(l, bb){
+  const cells = l.split("|");
+  if (cells.length && cells[0].trim() === "") cells.shift();
+  if (cells.length && cells[cells.length-1].trim() === "") cells.pop();
+  const out = [];
+  for (const cell of cells){
+    const toks = cell.trim().split(/\s+/).filter(Boolean);
+    if (!toks.length){ if (out.length) out[out.length-1].beats += bb; continue; }
+    const slot = bb / toks.length;
+    for (const t of toks){
+      if (HOLD_RE.test(t)){ if (out.length) out[out.length-1].beats += slot; continue; }
+      const c = chordTok(t);
+      if (c) out.push({name:c.name, beats: c.fixed != null ? c.fixed : slot});
+    }
+  }
+  return out;
+}
+
 function parseSong(txt){
-  const items = [], seq = [];
+  const items = [], seq = [], timeline = [];
+  const bb = barBeats(), sylPerBeat = S.pace || 1;
   const lines = txt.replace(/\t/g,"    ").split(/\r?\n/).map(l => l.replace(/\s+$/,""));
-  const isChordLine = l => { const t = l.trim(); return t !== "" && t.split(/\s+/).every(x => CHORD_RE.test(x)); };
   const plain = l => l !== undefined && l.trim() && !SECTION_RE.test(l.trim()) && !isChordLine(l) && !/^source:/i.test(l.trim());
+  let at = 0;                                                    // beats consumed so far
+  const put = (name, beats) => { timeline.push({name, occ:seq.length, start:at, beats}); seq.push(name); at += beats; };
+  const hold = beats => { if (timeline.length && beats > 0){ timeline[timeline.length-1].beats += beats; at += beats; } };
+
   for (let i=0;i<lines.length;i++){
     const l = lines[i], t = l.trim();
     if (!t){ if (items.length && items[items.length-1].type !== "gap") items.push({type:"gap"}); continue; }
     if (/^source:/i.test(t)) continue;
     if (SECTION_RE.test(t)){ items.push({type:"sec", text:t}); continue; }
-    if (isChordLine(l)){
-      const chords = [], re = /\S+/g; let m;
-      while ((m = re.exec(l))) { chords.push({name:m[0], pos:m.index, occ:seq.length}); seq.push(m[0]); }
-      let text = "";
-      if (plain(lines[i+1])) { text = lines[i+1]; i++; }
-      items.push({type:"line", text, chords});
-    } else items.push({type:"line", text:t, chords:[]});
+    if (!isChordLine(l)){ items.push({type:"line", text:t, chords:[]}); continue; }
+
+    let text = "";
+    if (plain(lines[i+1])) { text = lines[i+1]; i++; }
+    const chords = [];
+
+    if (l.includes("|")){
+      // Bar notation: timing is exact, so the lyric is split in proportion to it.
+      const bars = barChords(l, bb);
+      const lineBeats = bars.reduce((a, c) => a + c.beats, 0) || bb;
+      let run = 0;
+      for (const c of bars){
+        chords.push({name:c.name, beats:c.beats, occ:seq.length, pos: Math.round(text.length * run / lineBeats)});
+        put(c.name, c.beats);
+        run += c.beats;
+      }
+    } else {
+      // Aligned chords over words: infer each chord's length from the syllables it sits over.
+      const cs = [], re = /\S+/g; let m;
+      while ((m = re.exec(l))) { const c = chordTok(m[0]); if (c) cs.push({name:c.name, fixed:c.fixed, pos:m.index}); }
+      if (cs.length){
+        const cuts = cs.map(c => Math.min(c.pos, text.length));
+        const leadSyl = text ? synCount(text.slice(0, cuts[0])) : 0;
+        const w = cs.map((c, k) => text ? Math.max(1, synCount(text.slice(cuts[k], k+1 < cs.length ? cuts[k+1] : text.length))) : 1);
+
+        const flex = cs.map((c, k) => c.fixed == null ? k : -1).filter(k => k >= 0);
+        const fixedTotal = cs.reduce((a, c) => a + (c.fixed || 0), 0);
+        const weights = (leadSyl > 0 ? [leadSyl] : []).concat(flex.map(k => w[k]));
+        let got = [];
+        if (weights.length){
+          const totalSyl = leadSyl + flex.reduce((a, k) => a + w[k], 0);
+          let lineBeats = text
+            ? Math.max(1, Math.round((totalSyl / sylPerBeat) / bb)) * bb
+            : flex.length * bb;
+          while (lineBeats - fixedTotal < weights.length) lineBeats += bb;
+          got = share(lineBeats - fixedTotal, weights);
+        }
+        let g = 0;
+        if (leadSyl > 0) hold(got[g++]);
+        cs.forEach((c, k) => {
+          const beats = c.fixed != null ? c.fixed : got[g++];
+          chords.push({name:c.name, beats, occ:seq.length, pos:c.pos});
+          put(c.name, beats);
+        });
+      }
+    }
+    items.push({type:"line", text, chords});
   }
-  return {items, seq};
+  const totalBeats = Math.max(0, Math.ceil(at / bb) * bb);       // pad to a whole bar so looping stays in phase
+  if (timeline.length && totalBeats > at) timeline[timeline.length-1].beats += totalBeats - at;
+  return {items, seq, timeline, totalBeats, bars: totalBeats / bb};
 }
-function songHTML(song){
+function songHTML(song, showBeats){
   const seg = (ch, text) => `<span class="sg">${ch}<span class="tx">${text === "" ? "&nbsp;" : esc(text)}</span></span>`;
+  const bt = c => showBeats && c.beats ? `<i class="bt">${+c.beats.toFixed(2)}</i>` : "";
   return song.items.map((it, li) => {
     if (it.type === "gap") return '<div class="gap"></div>';
     if (it.type === "sec") return `<div class="sec">${esc(it.text)}</div>`;
@@ -501,7 +636,7 @@ function songHTML(song){
     let segs = cuts[0] > 0 ? seg('<span class="ch">&nbsp;</span>', t.slice(0, cuts[0])) : "";
     cs.forEach((c, k) => {
       const piece = t.slice(cuts[k], k+1 < cs.length ? cuts[k+1] : t.length);
-      segs += seg(`<span class="ch" data-occ="${c.occ}">${esc(c.name)}</span>`, t ? piece : "  ");
+      segs += seg(`<span class="ch" data-occ="${c.occ}">${esc(c.name)}${bt(c)}</span>`, t ? piece : "  ");
     });
     return `<div class="ln" data-li="${li}">${segs}</div>`;
   }).join("");
@@ -517,32 +652,61 @@ function markSong(root, occ){
 }
 function refreshSong(){
   SONG = parseSong(S.song || "");
-  $("lyrprev").innerHTML = SONG.items.length ? songHTML(SONG) : "";
+  $("lyrprev").innerHTML = SONG.items.length ? songHTML(SONG, true) : "";
   const uniq = [...new Set(SONG.seq)];
   $("songchords").innerHTML = uniq.map(c => `<div class="cwrap" style="background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:6px 10px"><b>${esc(c)}</b><div style="width:52px">${chordSVG(c)}</div></div>`).join("");
-  $("songinfo").textContent = SONG.seq.length ? `${SONG.seq.length} chord changes · ${uniq.length} different chords` : "";
+  $("songinfo").textContent = SONG.seq.length
+    ? `${SONG.seq.length} chord changes · ${SONG.bars} bars · ${uniq.length} different chords`
+    : "";
+  if (running) TL = buildTL();
   persist();
+}
+
+/* ---------- chord timeline ----------
+   One flat list of {name, occ, start, beats} in beats from the top, for both song mode
+   and the plain progression. The engine reads the chord off this by beat position, so a
+   chord lasts exactly as long as the song says rather than a fixed number of loops. */
+let TL = {tl:[], total:0};
+function buildTL(){
+  const bb = barBeats();
+  if (songActive()) return {tl:SONG.timeline, total:SONG.totalBeats};
+  if (!S.chords.length) return {tl:[], total:0};
+  const each = S.cbars * bb;
+  return {tl:S.chords.map((name, i) => ({name, occ:-1, start:i*each, beats:each})), total:S.chords.length * each};
+}
+const wrapBeat = b => TL.total > 0 ? ((b % TL.total) + TL.total) % TL.total : 0;
+function tlIndexAt(beat){
+  const tl = TL.tl;
+  if (!tl.length) return -1;
+  const x = wrapBeat(beat);
+  let lo = 0, hi = tl.length - 1, r = 0;
+  while (lo <= hi){ const m = (lo + hi) >> 1; if (tl[m].start <= x){ r = m; lo = m + 1; } else hi = m - 1; }
+  return r;
 }
 $("lyrtxt").value = S.song || "";
 $("songon").checked = S.songOn;
 $("lyrtxt").addEventListener("input", e => { S.song = e.target.value; refreshSong(); });
-$("songon").onchange = e => { S.songOn = e.target.checked; persist(); };
+$("songon").onchange = e => { S.songOn = e.target.checked; if (running) TL = buildTL(); persist(); };
+$("pace").value = String(S.pace || 1);
+$("pace").onchange = e => { S.pace = parseFloat(e.target.value) || 1; refreshSong(); };
 $("lyrex").onclick = () => { S.song = EXAMPLE_SONG; $("lyrtxt").value = EXAMPLE_SONG; S.songOn = true; $("songon").checked = true; refreshSong(); };
 $("lyrclear").onclick = () => { S.song = ""; $("lyrtxt").value = ""; refreshSong(); };
 
-function showChords(loops, i, counting){
-  const n = seq().length;
+function showChords(beat, counting){
+  const tl = TL.tl, n = tl.length;
   $("chordbox").classList.toggle("on", n>0); $("nextchord").classList.toggle("on", n>1);
   if (!n) return;
-  const ci = Math.floor(loops / S.cbars) % n;
-  const cur = seq()[ci], nxt = seq()[(ci+1)%n];
-  if (songActive() && ci !== lastOcc){ lastOcc = ci; markSong($("lyr"), ci); }
-  $("cname").textContent = cur; $("cdia").innerHTML = chordSVG(cur);
-  $("ncname").textContent = nxt; $("ncdia").innerHTML = chordSVG(nxt);
-  const lastLoop = (loops+1) % S.cbars === 0;
-  const warn = !counting && lastLoop && i >= S.pattern.length/2;
+  const ci = tlIndexAt(beat), cur = tl[ci], nxt = tl[(ci+1)%n];
+  if (songActive() && cur.occ !== lastOcc){ lastOcc = cur.occ; markSong($("lyr"), cur.occ); }
+  if (cur.name !== curName){ curName = cur.name; $("cname").textContent = cur.name; $("cdia").innerHTML = chordSVG(cur.name); }
+  if (nxt.name !== nxtName){ nxtName = nxt.name; $("ncname").textContent = nxt.name; $("ncdia").innerHTML = chordSVG(nxt.name); }
+  const left = cur.start + cur.beats - wrapBeat(beat);          // beats until the chord changes
+  const same = nxt.name === cur.name;
+  // Warn over the last 2 beats, but never for more than half of a short chord.
+  const warn = !counting && !same && left <= Math.min(2, Math.max(1, cur.beats / 2));
   $("nextchord").classList.toggle("warn", warn);
-  $("ncap").textContent = warn ? "switch next!" : "next chord";
+  $("ncap").textContent = warn ? (left <= 1 ? "switch now!" : "switch in 2")
+                        : same ? "stay on " + cur.name : "next chord";
 }
 
 function playChuck(t, chord){
@@ -558,7 +722,7 @@ function playChuck(t, chord){
 }
 
 /* ---------- engine ---------- */
-let running = false, timer = null, raf = null, events = [], nextTime = 0, idx = 0, countLeft = 0, loops = 0, paused = false;
+let running = false, timer = null, raf = null, events = [], nextTime = 0, idx = 0, countLeft = 0, loops = 0, step = 0, paused = false;
 
 function schedule(){
   while (nextTime < ctx.currentTime + 0.15){
@@ -573,12 +737,14 @@ function schedule(){
     const c = S.pattern[idx];
     const isBeat = idx%2===0;
     if (S.click && isBeat) tone(idx%8===0?1500:1000, nextTime, 0.03, "square", 0.06);
-    const cname = seq().length ? seq()[Math.floor(loops / S.cbars) % seq().length] : null;
+    const beat = step / 2;                               // eighth notes → beats since the music started
+    const ti = tlIndexAt(beat);
+    const cname = ti >= 0 ? TL.tl[ti].name : null;
     if (S.strum && c==="c") playChuck(nextTime, cname);
     else if (S.strum && c!=="-") playStrum(c, nextTime, cname);
-    events.push({t:nextTime, kind:"step", idx, loops});
+    events.push({t:nextTime, kind:"step", idx, loops, beat});
     nextTime += 60 / S.bpm / 2;
-    idx++;
+    idx++; step++;
     if (idx >= S.pattern.length){
       idx = 0; loops++;
       if (S.trainer && loops % S.tevery === 0 && S.bpm < S.tmax) setBpm(Math.min(S.tmax, S.bpm + S.tstep));
@@ -595,7 +761,7 @@ function arrowSVG(dir, ghost){
 function show(ev){
   if (ev.kind==="count"){
     $("countin").style.display = "flex"; $("countin").textContent = ev.n;
-    showChords(0, 0, true);
+    showChords(0, true);
     return;
   }
   $("countin").style.display = "none";
@@ -615,8 +781,11 @@ function show(ev){
   const nx = S.pattern[(i+1)%S.pattern.length], nh = (i+1)%2===0 ? "d" : "u";
   $("nextarrow").innerHTML = nx==="-" ? (S.ghost ? arrowSVG(nh,true) : '<span>rest</span>') : arrowSVG(nx,false);
   document.querySelectorAll("#sstrip .cell").forEach((cell,k) => cell.classList.toggle("now", k===i));
-  $("sloop").textContent = "Loop " + (ev.loops+1);
-  showChords(ev.loops, i, false);
+  const bb = barBeats();
+  $("sloop").textContent = TL.total
+    ? "Bar " + (Math.floor(wrapBeat(ev.beat) / bb) + 1) + " / " + Math.round(TL.total / bb)
+    : "Loop " + (ev.loops+1);
+  showChords(ev.beat, false);
 }
 function frame(){
   if (!running) return;
@@ -630,7 +799,8 @@ async function start(){
   if (S.sound !== "simple") warmUp();
   lastStrum = null;
   paused = false; $("pause").textContent = "Pause";
-  events = []; idx = 0; loops = 0; countLeft = S.countin ? 4 : 0;
+  events = []; idx = 0; loops = 0; step = 0; countLeft = S.countin ? 4 : 0;
+  TL = buildTL(); curName = nxtName = null;
   nextTime = ctx.currentTime + 0.1;
   $("sstrip").innerHTML = stripHTML(S.pattern, false);
   $("big").innerHTML = ""; $("word").textContent = ""; $("beat").textContent = ""; $("nextarrow").innerHTML = "";
