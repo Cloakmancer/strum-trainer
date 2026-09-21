@@ -108,6 +108,11 @@ input[type=range]{width:100%;accent-color:var(--up)}
 #nextchord .cname{font-size:clamp(22px,4vw,48px)}
 #nextchord svg{width:min(15vh,15vw)}
 .nostuff{color:var(--muted);font-size:13px}
+#ytbox{display:none;margin-top:12px}
+#ytbox.on{display:block}
+/* the API swaps the div for an iframe, so style both */
+#ytbox #ytplayer,#ytbox iframe{width:100%;max-width:420px;aspect-ratio:16/9;border:0;border-radius:10px;display:block;background:#000}
+#syt{font-variant-numeric:tabular-nums}
 </style>
 </head>
 <body>
@@ -171,7 +176,26 @@ input[type=range]{width:100%;accent-color:var(--up)}
   </section>
 
   <section>
-    <h2>4 · Speed</h2>
+    <h2>4 · Play along with a recording (optional)</h2>
+    <input type="text" id="yturl" placeholder="Paste a YouTube link" aria-label="YouTube link" autocomplete="off" spellcheck="false">
+    <div class="row">
+      <button id="ytload">Load video</button><button id="ytclear">Remove</button>
+      <span class="tag" id="ytinfo"></span>
+    </div>
+    <div id="ytbox"><div id="ytplayer"></div></div>
+    <div id="ytctl" style="display:none">
+      <div class="row"><button id="yttap">Tap 4 beats to sync</button>
+        <span class="tag" id="yttaphint">Play the video, then tap on the beat the chart should start from, and three beats after it.</span></div>
+      <div class="row"><span class="tag">Chart starts at <b id="ytoffv">0.00</b>s of the video</span>
+        <button data-nudge="-0.05">−0.05</button><button data-nudge="0.05">+0.05</button>
+        <span class="tag">Nudge if the chart runs early or late.</span></div>
+      <label class="opt"><input type="checkbox" id="yton"> <b>Follow the video's clock</b> — the record keeps time and the trainer follows it, through pauses and scrubbing.</label>
+    </div>
+    <p class="hint">Nothing is downloaded or analysed. The page only reads the player's time position, so you still set the tempo yourself — tap it in above. Pressing <b>Load video</b> contacts YouTube; nothing is requested until then, and the player runs on youtube-nocookie.com. In full screen the video is hidden behind the stage but keeps playing.</p>
+  </section>
+
+  <section>
+    <h2>5 · Speed</h2>
     <div class="bpmline"><span><span class="bpmnum" id="bpmnum">60</span> <span class="tag">BPM</span></span><span class="tag" id="bpmname">Easy</span></div>
     <input type="range" id="bpm" min="30" max="200" value="60" aria-label="Tempo in BPM">
     <div class="row"><button data-bpm="-5">−5</button><button data-bpm="5">+5</button><span class="tag">Start slow. If you can do 4 clean loops, go up 5.</span></div>
@@ -179,7 +203,7 @@ input[type=range]{width:100%;accent-color:var(--up)}
   </section>
 
   <section>
-    <h2>5 · Options</h2>
+    <h2>6 · Options</h2>
     <label class="opt"><input type="checkbox" id="click" checked> Metronome click</label>
     <label class="opt"><input type="checkbox" id="strum" checked> Strum sound</label>
     <div class="row" role="group" aria-label="Strum sound style" style="margin:0 0 8px 26px">
@@ -199,7 +223,7 @@ input[type=range]{width:100%;accent-color:var(--up)}
 </main>
 
 <div id="stage" aria-live="off">
-  <div id="top"><span id="sbpm"></span><span id="sloop"></span></div>
+  <div id="top"><span id="sbpm"></span><span id="syt"></span><span id="sloop"></span></div>
   <div id="center">
     <div id="chordbox" class="cwrap"><span class="cap">chord</span><div class="cname" id="cname"></div><div id="cdia"></div></div>
     <div id="main">
@@ -241,7 +265,8 @@ const PRESETS = [
 ];
 const save = JSON.parse(localStorage.getItem("strum-v1") || "{}");
 const S = Object.assign({pattern:["d","-","d","u","-","u","d","u"], bpm:60, click:true, strum:true, countin:true, ghost:true,
-  instrument:"uke", sound:"real", song:"", songOn:false, chords:["C","Am","F","G"], cbars:1, pace:1, karaoke:false, trainer:false, tstep:5, tevery:4, tmax:100}, save);
+  instrument:"uke", sound:"real", song:"", songOn:false, chords:["C","Am","F","G"], cbars:1, pace:1, karaoke:false,
+  ytUrl:"", ytOffset:0, ytOn:false, trainer:false, tstep:5, tevery:4, tmax:100}, save);
 const persist = () => { try{ localStorage.setItem("strum-v1", JSON.stringify(S)); }catch(e){} };
 
 /* ---------- pattern parsing / rendering ---------- */
@@ -333,6 +358,143 @@ document.addEventListener("keydown", e => {
   if (/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName)) return;
   e.preventDefault(); doTap();
 });
+
+/* ---------- play along with a YouTube recording ----------
+   The audio of a YouTube embed cannot be read — it is a cross-origin iframe — but its
+   time position can. So the record keeps time and the trainer follows it: every step is
+   placed from the video clock instead of from a free-running metronome, which means a
+   pause, a seek or a playback-rate change carries the chart along with it. */
+const YTID_RE = /(?:youtu\.be\/|youtube(?:-nocookie)?\.com\/(?:watch\?(?:.*&)?v=|embed\/|shorts\/|live\/|v\/))([A-Za-z0-9_-]{11})/;
+function ytId(u){
+  u = (u || "").trim();
+  const m = YTID_RE.exec(u);
+  return m ? m[1] : /^[A-Za-z0-9_-]{11}$/.test(u) ? u : null;
+}
+const pnow = () => performance.now() / 1000;
+let YTP = null, ytReady = false, ytLoading = false, ytTaps = [];
+const YTV = {aV:0, aT:0, vT:0, fresh:0, last:-1, playing:false, rate:1};
+
+function ytApi(){
+  return new Promise((res, rej) => {
+    if (window.YT && window.YT.Player) return res();
+    if (!ytLoading){
+      ytLoading = true;
+      const s = document.createElement("script");
+      s.src = "https://www.youtube.com/iframe_api";
+      document.head.appendChild(s);
+    }
+    const t0 = pnow();
+    const poll = setInterval(() => {
+      if (window.YT && window.YT.Player){ clearInterval(poll); res(); }
+      else if (pnow() - t0 > 15){ clearInterval(poll); ytLoading = false; rej(new Error("YouTube did not load — check the connection")); }
+    }, 100);
+  });
+}
+const ytShowOff = () => { $("ytoffv").textContent = (+S.ytOffset || 0).toFixed(2); };
+const ytCtl = on => { $("ytctl").style.display = on ? "" : "none"; };
+
+async function ytLoadVideo(){
+  const id = ytId(S.ytUrl);
+  if (!id){ $("ytinfo").textContent = "That does not look like a YouTube link."; return; }
+  $("ytinfo").textContent = "Loading the player…";
+  try { await ytApi(); } catch(e){ $("ytinfo").textContent = e.message + "."; return; }
+  $("ytbox").classList.add("on");
+  if (YTP && YTP.loadVideoById){ YTP.loadVideoById(id); $("ytinfo").textContent = "Video loaded."; ytCtl(true); return; }
+  YTP = new YT.Player("ytplayer", {
+    videoId: id, host: "https://www.youtube-nocookie.com",
+    playerVars: {playsinline:1, rel:0, modestbranding:1},
+    events: {
+      onReady: () => { ytReady = true; ytCtl(true); $("ytinfo").textContent = "Loaded. Play it, then tap 4 beats."; },
+      onStateChange: e => { YTV.playing = e.data === 1; YTV.last = -1; },
+      onError: () => { $("ytinfo").textContent = "YouTube will not play that video here. Try another link."; }
+    }
+  });
+}
+
+// Where the video is now. getCurrentTime() updates in steps and never reads ahead of the
+// truth, so it is a lower bound: hold the tightest one seen and run it forward on the local
+// clock. Re-anchoring on every reading instead would settle onto that reading's own lag.
+function ytTime(){
+  if (!ytReady || !YTP || !YTP.getCurrentTime) return null;
+  const v = YTP.getCurrentTime(), t = pnow();
+  if (YTP.getPlaybackRate) YTV.rate = YTP.getPlaybackRate() || 1;
+  // A fresh anchor carries the reading's own lag until the next step in getCurrentTime
+  // tightens it, so mark it and let ytAlign() wait rather than renumber from a coarse value.
+  const anchor = () => { YTV.aV = v; YTV.aT = t; YTV.vT = t; YTV.last = v; YTV.fresh = t; return v; };
+  if (!YTV.playing) return anchor();
+  if (v !== YTV.last){ YTV.last = v; YTV.vT = t; }
+  let est = YTV.aV + (t - YTV.aT) * YTV.rate;
+  if (v < YTV.aV - 0.5 || v > est + 0.5) return anchor();      // seeked
+  if (t - YTV.vT > 0.6) return anchor();                       // stalled or buffering
+  if (v > est){ YTV.aV = v; YTV.aT = t; YTV.fresh = 0; est = v; }   // a tighter lower bound
+  return est;
+}
+const ytMode = () => S.ytOn && ytReady;          // following the record, playing or not
+const fmtTime = s => { s = Math.max(0, Math.floor(s||0)); return Math.floor(s/60) + ":" + String(s%60).padStart(2,"0"); };
+
+// Place the next step from the video clock. Returns false while there is nothing to play yet.
+function ytAlign(){
+  const v = ytTime();
+  if (v == null) return false;
+  const spb = 30 / S.bpm;                                    // video seconds per eighth-note step
+  const wall = spb / (YTV.rate || 1);                        // …and how long that takes us
+  const stepNow = (v - (+S.ytOffset || 0)) / spb;
+  if (stepNow < -1){ nextTime = ctx.currentTime + 0.05; return false; }   // still in the intro
+  const drift = ctx.currentTime + (step - stepNow) * wall - nextTime;
+  if (Math.abs(drift) > 0.15){                               // seeked, resumed, or just started
+    // Hold for a moment if the clock estimate has not tightened yet: renumbering off a
+    // coarse reading lands the whole grid an eighth note out.
+    if (YTV.fresh && pnow() - YTV.fresh < 0.4){ nextTime = ctx.currentTime + 0.05; return false; }
+    const L = S.pattern.length;
+    step = Math.max(0, Math.ceil(stepNow));
+    idx = step % L; loops = Math.floor(step / L); events = [];
+    nextTime = ctx.currentTime + Math.max(0.03, (step - stepNow) * wall);
+  } else {                                                   // creep, so jitter is not chased
+    nextTime += Math.max(-0.012, Math.min(0.012, drift));
+    if (nextTime < ctx.currentTime) nextTime = ctx.currentTime + 0.01;
+  }
+  return true;
+}
+
+function ytTap(){
+  const v = ytTime();
+  if (v == null){ $("yttaphint").textContent = "Load the video first."; return; }
+  if (!YTV.playing){ $("yttaphint").textContent = "Press play on the video, then tap."; return; }
+  const t = pnow();
+  if (ytTaps.length && t - ytTaps[ytTaps.length-1].t > 2.5) ytTaps = [];
+  ytTaps.push({t, v});
+  if (ytTaps.length === 1){
+    S.ytOffset = v; ytShowOff(); persist();
+    $("yttaphint").textContent = `Chart starts at ${v.toFixed(2)}s. Now tap the next three beats…`;
+    return;
+  }
+  const n = ytTaps.length - 1, span = ytTaps[n].v - ytTaps[0].v;
+  if (span <= 0){ $("yttaphint").textContent = "Tap a little slower."; return; }
+  let bpm = 60 * n / span;
+  while (bpm < 30) bpm *= 2;
+  while (bpm > 200) bpm /= 2;
+  setBpm(Math.round(bpm));
+  $("yttaphint").innerHTML = `${ytTaps.length} taps → <b>${Math.round(bpm)} BPM</b>, chart starts at ${(+S.ytOffset).toFixed(2)}s`;
+}
+
+$("yturl").value = S.ytUrl || "";
+$("yturl").addEventListener("input", e => { S.ytUrl = e.target.value; persist(); });
+$("ytload").onclick = ytLoadVideo;
+$("ytclear").onclick = () => {
+  try{ if (YTP && YTP.stopVideo) YTP.stopVideo(); }catch(e){}
+  S.ytOn = false; $("yton").checked = false;
+  $("ytbox").classList.remove("on"); ytCtl(false); $("ytinfo").textContent = "";
+  persist();
+};
+$("yttap").onclick = ytTap;
+document.querySelectorAll("[data-nudge]").forEach(b => b.onclick = () => {
+  S.ytOffset = Math.max(0, Math.round(((+S.ytOffset || 0) + +b.dataset.nudge) * 100) / 100);
+  ytShowOff(); persist();
+});
+$("yton").checked = S.ytOn;
+$("yton").onchange = e => { S.ytOn = e.target.checked; persist(); };
+ytShowOff();
+if (S.ytUrl) $("ytinfo").textContent = "Press Load video to start the player.";
 $("sminus").onclick = () => setBpm(S.bpm-5);
 $("splus").onclick = () => setBpm(S.bpm+5);
 for (const k of ["click","strum","countin","ghost","trainer"]){
@@ -770,6 +932,8 @@ function schedule(){
       nextTime += 60 / S.bpm;
       continue;
     }
+    // The record keeps time. Nothing is scheduled while it is paused or before the downbeat.
+    if (ytMode() && (!YTV.playing || !ytAlign())){ nextTime = ctx.currentTime + 0.05; break; }
     const c = S.pattern[idx];
     const isBeat = idx%2===0;
     if (S.click && isBeat) tone(idx%8===0?1500:1000, nextTime, 0.03, "square", 0.06);
@@ -779,11 +943,13 @@ function schedule(){
     if (S.strum && c==="c") playChuck(nextTime, cname);
     else if (S.strum && c!=="-") playStrum(c, nextTime, cname);
     events.push({t:nextTime, kind:"step", idx, loops, beat});
-    nextTime += 60 / S.bpm / 2;
+    // A record played at 0.75× takes proportionally longer to cross a step.
+    nextTime += (60 / S.bpm / 2) / (ytMode() ? (YTV.rate || 1) : 1);
     idx++; step++;
     if (idx >= S.pattern.length){
       idx = 0; loops++;
-      if (S.trainer && loops % S.tevery === 0 && S.bpm < S.tmax) setBpm(Math.min(S.tmax, S.bpm + S.tstep));
+      // The speed trainer would pull the chart off a record that is not speeding up.
+      if (S.trainer && !ytMode() && loops % S.tevery === 0 && S.bpm < S.tmax) setBpm(Math.min(S.tmax, S.bpm + S.tstep));
     }
   }
 }
@@ -825,6 +991,7 @@ function show(ev){
 function frame(){
   if (!running) return;
   while (events.length && events[0].t <= ctx.currentTime) show(events.shift());
+  if (S.ytOn && ytReady) $("syt").textContent = YTV.playing ? "▶ " + fmtTime(ytTime()) : "❚❚ video paused";
   raf = requestAnimationFrame(frame);
 }
 async function start(){
@@ -834,8 +1001,12 @@ async function start(){
   if (S.sound !== "simple") warmUp();
   lastStrum = null;
   paused = false; $("pause").textContent = "Pause";
-  events = []; idx = 0; loops = 0; step = 0; countLeft = S.countin ? 4 : 0;
+  const withYt = S.ytOn && ytReady;
+  events = []; idx = 0; loops = 0; step = 0;
+  countLeft = (S.countin && !withYt) ? 4 : 0;          // the record is the count-in
   TL = buildTL(); curName = nxtName = null;
+  $("syt").textContent = withYt ? "waiting for the video…" : "";
+  if (withYt) try{ YTP.playVideo(); }catch(e){}
   nextTime = ctx.currentTime + 0.1;
   $("sstrip").innerHTML = stripHTML(S.pattern, false);
   $("big").innerHTML = ""; $("word").textContent = ""; $("beat").textContent = ""; $("nextarrow").innerHTML = "";
@@ -852,6 +1023,7 @@ async function start(){
 }
 function stop(){
   running = false; clearInterval(timer); cancelAnimationFrame(raf);
+  if (S.ytOn && ytReady) try{ YTP.pauseVideo(); }catch(e){}
   $("stage").classList.remove("on");
   if (document.fullscreenElement) document.exitFullscreen().catch(()=>{});
   if (ctx && ctx.state==="suspended") ctx.resume();
@@ -860,6 +1032,7 @@ function togglePause(){
   if (!running) return;
   paused = !paused;
   if (paused) ctx.suspend(); else ctx.resume();
+  if (S.ytOn && ytReady) try{ paused ? YTP.pauseVideo() : YTP.playVideo(); }catch(e){}
   $("pause").textContent = paused ? "Resume" : "Pause";
 }
 $("start").onclick = start;
