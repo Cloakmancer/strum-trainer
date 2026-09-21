@@ -152,8 +152,9 @@ input[type=range]{width:100%;accent-color:var(--up)}
       <button id="lyrex">Load example</button><button id="lyrclear">Clear</button>
       <span class="tag" id="songinfo"></span>
     </div>
-    <label class="opt"><input type="checkbox" id="songon"> Follow this song in full screen (each chord lasts as long as the song says)</label>
-    <div class="row"><label class="tag" for="pace">Lyric pace</label>
+    <label class="opt"><input type="checkbox" id="songon"> Follow this song in full screen (chords come from the song, one per change)</label>
+    <label class="opt"><input type="checkbox" id="karaoke"> <b>Karaoke timing</b> — each chord lasts as long as the song says. Off = every chord lasts the same, set by "Change chord every N loops" above.</label>
+    <div class="row" id="pacerow"><label class="tag" for="pace">Lyric pace</label>
       <select id="pace" style="background:var(--bg);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:8px;font-size:16px">
         <option value="0.5">Slow — about 1 word every 2 beats</option>
         <option value="1">Normal — about 1 syllable per beat</option>
@@ -162,7 +163,7 @@ input[type=range]{width:100%;accent-color:var(--up)}
       <span class="tag">only affects lines without bar marks</span></div>
     <div class="row" id="songchords"></div>
     <div class="song" id="lyrprev"></div>
-    <p class="hint">The small grey number after each chord is how many beats it will last. One bar = one loop of your pattern.<br>
+    <p class="hint" id="karahint">With karaoke timing on, the small grey number after each chord is how many beats it will last. One bar = one loop of your pattern.<br>
       <b>Lined-up chords</b> — put them above the lyric line over the word where you change. Each chord's length is worked out from the syllables it sits over, so a chord held over a long phrase lasts longer.<br>
       <b>Bar marks</b> — for exact timing, write the line as bars: <code>| C | C | Am | F G |</code>. Chords inside one bar split it evenly and <code>.</code> holds the one before it (<code>| C . . G |</code>). A lyric line can still sit underneath.<br>
       <b>Fixing one chord</b> — add a colon and the number of beats to any chord in either style: <code>F:2</code>, <code>G:1.5</code>.<br>
@@ -174,6 +175,7 @@ input[type=range]{width:100%;accent-color:var(--up)}
     <div class="bpmline"><span><span class="bpmnum" id="bpmnum">60</span> <span class="tag">BPM</span></span><span class="tag" id="bpmname">Easy</span></div>
     <input type="range" id="bpm" min="30" max="200" value="60" aria-label="Tempo in BPM">
     <div class="row"><button data-bpm="-5">−5</button><button data-bpm="5">+5</button><span class="tag">Start slow. If you can do 4 clean loops, go up 5.</span></div>
+    <div class="row"><button id="tap">Tap tempo</button><span class="tag" id="taphint">Play the song anywhere and tap on the beat — or press <b>T</b>. Four taps is enough.</span></div>
   </section>
 
   <section>
@@ -239,7 +241,7 @@ const PRESETS = [
 ];
 const save = JSON.parse(localStorage.getItem("strum-v1") || "{}");
 const S = Object.assign({pattern:["d","-","d","u","-","u","d","u"], bpm:60, click:true, strum:true, countin:true, ghost:true,
-  instrument:"uke", sound:"real", song:"", songOn:false, chords:["C","Am","F","G"], cbars:1, pace:1, trainer:false, tstep:5, tevery:4, tmax:100}, save);
+  instrument:"uke", sound:"real", song:"", songOn:false, chords:["C","Am","F","G"], cbars:1, pace:1, karaoke:false, trainer:false, tstep:5, tevery:4, tmax:100}, save);
 const persist = () => { try{ localStorage.setItem("strum-v1", JSON.stringify(S)); }catch(e){} };
 
 /* ---------- pattern parsing / rendering ---------- */
@@ -302,6 +304,35 @@ function setBpm(v){
 $("bpm").oninput = e => setBpm(+e.target.value);
 $("sbpmrange").oninput = e => setBpm(+e.target.value);
 document.querySelectorAll("[data-bpm]").forEach(b => b.onclick = () => setBpm(S.bpm + +b.dataset.bpm));
+
+/* ---------- tap tempo ----------
+   Median of the recent gaps, outliers dropped, then folded into the 30–200 range
+   so tapping half-time or double-time still lands on a usable number. */
+let taps = [];
+function doTap(){
+  const now = performance.now();
+  if (taps.length && now - taps[taps.length-1] > 2500) taps = [];     // long pause = start again
+  taps.push(now);
+  if (taps.length < 2){ $("taphint").textContent = "Keep tapping…"; return; }
+  const gaps = [];
+  for (let i = Math.max(1, taps.length-8); i < taps.length; i++) gaps.push(taps[i] - taps[i-1]);
+  const med = [...gaps].sort((a,b) => a-b)[gaps.length >> 1];
+  const keep = gaps.filter(g => Math.abs(g - med) < med * 0.35);
+  const avg = (keep.length ? keep : gaps).reduce((a,b) => a+b, 0) / (keep.length || gaps.length);
+  let bpm = 60000 / avg;
+  while (bpm < 30) bpm *= 2;
+  while (bpm > 200) bpm /= 2;
+  setBpm(Math.round(bpm));
+  const spread = Math.round(Math.max(...gaps) - Math.min(...gaps));
+  $("taphint").innerHTML = `${taps.length} taps → <b>${Math.round(bpm)} BPM</b>` +
+    (taps.length < 4 ? " · keep going" : spread > avg*0.25 ? " · taps are uneven, try again" : " · looks steady");
+}
+$("tap").onclick = doTap;
+document.addEventListener("keydown", e => {
+  if (e.key.toLowerCase() !== "t" || e.ctrlKey || e.metaKey || e.altKey) return;
+  if (/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName)) return;
+  e.preventDefault(); doTap();
+});
 $("sminus").onclick = () => setBpm(S.bpm-5);
 $("splus").onclick = () => setBpm(S.bpm+5);
 for (const k of ["click","strum","countin","ghost","trainer"]){
@@ -652,12 +683,13 @@ function markSong(root, occ){
 }
 function refreshSong(){
   SONG = parseSong(S.song || "");
-  $("lyrprev").innerHTML = SONG.items.length ? songHTML(SONG, true) : "";
+  $("lyrprev").innerHTML = SONG.items.length ? songHTML(SONG, S.karaoke) : "";
   const uniq = [...new Set(SONG.seq)];
   $("songchords").innerHTML = uniq.map(c => `<div class="cwrap" style="background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:6px 10px"><b>${esc(c)}</b><div style="width:52px">${chordSVG(c)}</div></div>`).join("");
-  $("songinfo").textContent = SONG.seq.length
-    ? `${SONG.seq.length} chord changes · ${SONG.bars} bars · ${uniq.length} different chords`
-    : "";
+  $("songinfo").textContent = !SONG.seq.length ? ""
+    : `${SONG.seq.length} chord changes · ${uniq.length} different chords` + (S.karaoke ? ` · ${SONG.bars} bars` : "");
+  $("pacerow").style.display = S.karaoke ? "" : "none";
+  $("karahint").style.opacity = S.karaoke ? "" : ".55";
   if (running) TL = buildTL();
   persist();
 }
@@ -667,12 +699,14 @@ function refreshSong(){
    and the plain progression. The engine reads the chord off this by beat position, so a
    chord lasts exactly as long as the song says rather than a fixed number of loops. */
 let TL = {tl:[], total:0};
+const karaokeOn = () => songActive() && S.karaoke;
 function buildTL(){
-  const bb = barBeats();
-  if (songActive()) return {tl:SONG.timeline, total:SONG.totalBeats};
-  if (!S.chords.length) return {tl:[], total:0};
-  const each = S.cbars * bb;
-  return {tl:S.chords.map((name, i) => ({name, occ:-1, start:i*each, beats:each})), total:S.chords.length * each};
+  if (karaokeOn()) return {tl:SONG.timeline, total:SONG.totalBeats};
+  // Original behaviour: every chord lasts cbars loops of the pattern, song or not.
+  const names = songActive() ? SONG.seq : S.chords;
+  if (!names.length) return {tl:[], total:0};
+  const each = S.cbars * barBeats();
+  return {tl:names.map((name, i) => ({name, occ: songActive() ? i : -1, start:i*each, beats:each})), total:names.length * each};
 }
 const wrapBeat = b => TL.total > 0 ? ((b % TL.total) + TL.total) % TL.total : 0;
 function tlIndexAt(beat){
@@ -689,6 +723,8 @@ $("lyrtxt").addEventListener("input", e => { S.song = e.target.value; refreshSon
 $("songon").onchange = e => { S.songOn = e.target.checked; if (running) TL = buildTL(); persist(); };
 $("pace").value = String(S.pace || 1);
 $("pace").onchange = e => { S.pace = parseFloat(e.target.value) || 1; refreshSong(); };
+$("karaoke").checked = S.karaoke;
+$("karaoke").onchange = e => { S.karaoke = e.target.checked; refreshSong(); };
 $("lyrex").onclick = () => { S.song = EXAMPLE_SONG; $("lyrtxt").value = EXAMPLE_SONG; S.songOn = true; $("songon").checked = true; refreshSong(); };
 $("lyrclear").onclick = () => { S.song = ""; $("lyrtxt").value = ""; refreshSong(); };
 
@@ -781,9 +817,8 @@ function show(ev){
   const nx = S.pattern[(i+1)%S.pattern.length], nh = (i+1)%2===0 ? "d" : "u";
   $("nextarrow").innerHTML = nx==="-" ? (S.ghost ? arrowSVG(nh,true) : '<span>rest</span>') : arrowSVG(nx,false);
   document.querySelectorAll("#sstrip .cell").forEach((cell,k) => cell.classList.toggle("now", k===i));
-  const bb = barBeats();
-  $("sloop").textContent = TL.total
-    ? "Bar " + (Math.floor(wrapBeat(ev.beat) / bb) + 1) + " / " + Math.round(TL.total / bb)
+  $("sloop").textContent = karaokeOn()
+    ? "Bar " + (Math.floor(wrapBeat(ev.beat) / barBeats()) + 1) + " / " + Math.round(TL.total / barBeats())
     : "Loop " + (ev.loops+1);
   showChords(ev.beat, false);
 }
